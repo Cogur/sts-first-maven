@@ -1,0 +1,110 @@
+name: HomeGuard Android release
+
+# Builds a signed Android App Bundle and uploads it to Google Play.
+# Run manually from the Actions tab: choose the track, the release is
+# created as a DRAFT so nothing reaches users until you roll it out in
+# the Play Console.
+
+on:
+  workflow_dispatch:
+    inputs:
+      track:
+        description: Play track
+        type: choice
+        options: [internal, alpha, beta, production]
+        default: internal
+      upload:
+        description: Upload to Google Play (otherwise only build the .aab artifact)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homeguard-android-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: homeguard
+    env:
+      PACKAGE_NAME: com.homeguard.local.homeguard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Restore upload keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 is not set (see homeguard/docs/PLAY_STORE.md)"
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+
+      - name: Build signed App Bundle
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        # versionCode must increase on every upload; the run number does.
+        run: flutter build appbundle --release --build-number=$((1000 + GITHUB_RUN_NUMBER))
+
+      - name: Verify bundle is not debug-signed
+        run: |
+          certs=$(jarsigner -verify -verbose -certs build/app/outputs/bundle/release/app-release.aab)
+          if echo "$certs" | grep -q "CN=Android Debug"; then
+            echo "::error::Bundle is debug-signed"
+            exit 1
+          fi
+          if ! echo "$certs" | grep -q "jar verified"; then
+            echo "::error::Bundle is not signed"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homeguard-release-aab
+          path: homeguard/build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
+
+      - name: Upload to Google Play
+        if: ${{ inputs.upload }}
+        uses: r0adkll/upload-google-play@v1.1.3
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.PACKAGE_NAME }}
+          releaseFiles: homeguard/build/app/outputs/bundle/release/app-release.aab
+          track: ${{ inputs.track }}
+          status: draft
+
+      - name: Remove keystore
+        if: always()
+        working-directory: .
+        run: rm -f "$RUNNER_TEMP/upload.jks"

@@ -116,9 +116,7 @@ flutter build apk --release
 flutter build ipa      # needs Xcode + signing
 ```
 
-Before publishing:
-- Change `applicationId` / bundle identifier (`com.homeguard.local.homeguard`).
-- Configure release signing (the template signs release builds with the debug key).
+Publishing to Google Play: see [`docs/PLAY_STORE.md`](docs/PLAY_STORE.md). It covers the signing key, the first manual upload, the privacy policy and data-safety answers, and the GitHub Actions workflow that builds and uploads signed bundles.
 
 Platform notes:
 - **Android**: minSdk 28. `MainActivity` extends `FlutterFragmentActivity` (needed by `local_auth`).
