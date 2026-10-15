@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NVRs, door stations and indoor monitors on a home LAN serve plain HTTP/RTSP
+  and cannot be addressed by hostname patterns here (IP literals), so cleartext
+  must be permitted at the OS level. The app itself enforces the policy:
+  remote routes in "TLS" mode only ever use https:// / rtsps://, and remote
+  plaintext is used only when the user declared the route as a VPN tunnel
+  (see ConnectionManager / RemoteMode).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <!-- System CAs only: user-installed CAs cannot intercept TLS. -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

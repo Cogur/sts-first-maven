@@ -1,0 +1,23 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+  language:
+    strict-casts: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    # Explicit private-field assignment keeps the code compatible with the
+    # older Dart SDK bundled in FlutterFlow's custom-code editor.
+    prefer_initializing_formals: false
+    avoid_print: true
+    cancel_subscriptions: true
+    close_sinks: true
+    unawaited_futures: false
+
+formatter:
+  page_width: 110
