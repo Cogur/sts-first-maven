@@ -13,6 +13,18 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
 - **Follows the moving gauge.** On the Flair 58 the gauge sits on the piston
   stem and moves down during the shot. The reader tracks the bezel so the
   reading stays correct.
+- **Steady needle.** Two switches (Settings, or the slider icon on the Brew
+  screen), both on by default:
+  - *Smooth gauge movement* removes flicker. It smooths strongly while the
+    needle is still and lightly while it moves, so a lever pull is followed
+    without visible lag.
+  - *Ignore impossible jumps* drops readings that would need a faster
+    pressure change than a hand on the lever can make (above 10 bar/s
+    rising or 30 bar/s falling). Misreads then don't spike the graph. A real
+    fast release is still followed after 3 frames, about 0.2 s.
+
+  In the zoomed gauge view the thick needle is the recorded value. The thin
+  line is the raw detection, orange when it was thrown out.
 - **BOOKOO scale over Bluetooth LE.** Weight, flow rate and battery come from
   BOOKOO's published protocol (service `0x0FFE`). The app tares the scale and
   starts or stops the scale timer for you. It reconnects to the last scale
@@ -49,6 +61,7 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
 | `lib/vision/gauge_reader.dart` | Needle detection (ray sampling + robust percentile score) and gauge tracking |
 | `lib/vision/camera_gauge_source.dart` | Camera image stream → luma frames → readings, zoomed gauge view |
 | `lib/vision/gauge_calibration.dart` | Angle ↔ bar mapping, calibration storage |
+| `lib/vision/needle_filter.dart` | Jump rejection (rate limit + confirmation) and One Euro smoothing of readings |
 | `lib/scale/bookoo_protocol.dart` | BOOKOO packet parsing and commands |
 | `lib/scale/bookoo_scale.dart`, `scale_manager.dart` | BLE connection (flutter_blue_plus), reconnects |
 | `lib/brew/brew_session.dart` | 10 Hz recording, auto start/stop, flow from weight |

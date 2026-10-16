@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../vision/camera_gauge_source.dart';
 import '../../vision/gauge_calibration.dart';
 import '../../vision/gauge_reader.dart';
+import '../../vision/pressure_source.dart';
 import 'brew_chart.dart';
 
 /// Zoomed greyscale view of the gauge exactly as the detector sees it, with
@@ -39,6 +40,7 @@ class GaugeView extends StatelessWidget {
               roi: roi,
               cal: cal,
               reading: source.lastReading,
+              sample: source.latest,
               color: ChartColors.pressure(Brightness.dark),
             ),
             child: const SizedBox.expand(),
@@ -54,12 +56,14 @@ class _GaugePainter extends CustomPainter {
     required this.roi,
     required this.cal,
     required this.reading,
+    required this.sample,
     required this.color,
   });
 
   final RoiView roi;
   final GaugeCalibration cal;
   final GaugeReading? reading;
+  final PressureSample? sample;
   final Color color;
 
   @override
@@ -92,8 +96,25 @@ class _GaugePainter extends CustomPainter {
       canvas.drawLine(c + d * rad * 0.88, c + d * rad * 1.05, ring);
     }
 
+    // Raw detection: thin line, orange when dropped as an impossible jump.
     if (r.isValid) {
       final d = Offset(math.cos(r.angle), math.sin(r.angle));
+      canvas.drawLine(
+        c + d * rad * 0.2,
+        c + d * rad * 0.95,
+        Paint()
+          ..color = (sample?.rejected ?? false)
+              ? Colors.orangeAccent
+              : Colors.white.withValues(alpha: 0.45)
+          ..strokeWidth = 1.5
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+    // The value that is shown and recorded (after smoothing / rejection).
+    final bar = sample?.bar;
+    if (bar != null) {
+      final a = cal.angleForValue(bar);
+      final d = Offset(math.cos(a), math.sin(a));
       canvas.drawLine(
         c + d * rad * 0.2,
         c + d * rad * 0.95,

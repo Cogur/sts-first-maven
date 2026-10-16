@@ -48,6 +48,21 @@ class SettingsScreen extends StatelessWidget {
               onChanged: (v) => s.targetYield = v.roundToDouble(),
             ),
             const _Header('Gauge'),
+            CheckboxListTile(
+              title: const Text('Smooth gauge movement'),
+              subtitle: const Text(
+                  'Removes needle flicker; follows the lever without visible lag'),
+              value: s.smoothGauge,
+              onChanged: (v) => s.smoothGauge = v ?? true,
+            ),
+            CheckboxListTile(
+              title: const Text('Ignore impossible jumps'),
+              subtitle: const Text(
+                  'Drops readings that would need a faster pressure change than a '
+                  'hand on the lever can make, so misreads don\'t spike the graph'),
+              value: s.rejectGaugeJumps,
+              onChanged: (v) => s.rejectGaugeJumps = v ?? true,
+            ),
             ListTile(
               title: const Text('Calibration'),
               subtitle: Text(s.calibration == null

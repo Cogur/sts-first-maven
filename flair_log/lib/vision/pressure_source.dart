@@ -4,15 +4,28 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import 'gauge_reader.dart';
+import 'needle_filter.dart';
 
 class PressureSample {
-  const PressureSample({required this.at, this.bar, this.reading});
+  const PressureSample({
+    required this.at,
+    this.bar,
+    this.reading,
+    this.rawBar,
+    this.rejected = false,
+  });
 
   final DateTime at;
 
   /// null when the needle could not be read in this frame.
   final double? bar;
   final GaugeReading? reading;
+
+  /// The unfiltered reading of this frame (for display/debugging).
+  final double? rawBar;
+
+  /// True when [rawBar] was dropped as an implausible jump.
+  final bool rejected;
 }
 
 /// Something that produces gauge pressure readings: the camera, or a
@@ -21,6 +34,10 @@ abstract class PressureSource extends ChangeNotifier {
   Stream<PressureSample> get samples;
 
   PressureSample? get latest;
+
+  /// Smoothing and jump rejection applied to every reading. The brew screen
+  /// keeps its switches in sync with Settings.
+  final NeedleFilter filter = NeedleFilter();
 
   /// Called when the user arms a new shot (gauge back at rest).
   void prepareForShot();
@@ -47,8 +64,10 @@ class SimulatedPressureSource extends PressureSource {
   PressureSample? get latest => _latest;
 
   @override
-  void prepareForShot() =>
-      _t0 = DateTime.now().add(const Duration(seconds: 2));
+  void prepareForShot() {
+    _t0 = DateTime.now().add(const Duration(seconds: 2));
+    filter.reset();
+  }
 
   static double profile(double t) {
     if (t < 0) return 0;
@@ -68,9 +87,15 @@ class SimulatedPressureSource extends PressureSource {
       final t = t0 == null
           ? -1.0
           : DateTime.now().difference(t0).inMilliseconds / 1000.0;
-      var p = profile(t);
-      if (p > 0) p += (_rnd.nextDouble() - 0.5) * 0.25;
-      _latest = PressureSample(at: DateTime.now(), bar: math.max(0, p));
+      // Imitate the camera detector: jitter, plus now and then a frame
+      // where the needle is confused with a numeral or a reflection.
+      var raw = profile(t) + (_rnd.nextDouble() - 0.5) * 0.5;
+      if (_rnd.nextDouble() < 0.04) raw = 1 + _rnd.nextDouble() * 13;
+      raw = math.max(0, raw);
+      final now = DateTime.now();
+      final bar = filter.update(raw, now.microsecondsSinceEpoch / 1e6);
+      _latest = PressureSample(
+          at: now, bar: bar, rawBar: raw, rejected: filter.lastRejected);
       _ctrl.add(_latest!);
     });
   }

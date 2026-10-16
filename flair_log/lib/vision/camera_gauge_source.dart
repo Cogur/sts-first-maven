@@ -51,7 +51,6 @@ class CameraGaugeSource extends PressureSource {
   bool _roiBusy = false;
   DateTime _lastFrame = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastRoi = DateTime.fromMillisecondsSinceEpoch(0);
-  final List<double> _recent = [];
   Completer<LumaFrame>? _grab;
 
   double minZoom = 1, maxZoom = 1, zoom = 1;
@@ -131,7 +130,7 @@ class CameraGaugeSource extends PressureSource {
     } else {
       r.updateCalibration(c);
     }
-    _recent.clear();
+    filter.reset();
     notifyListeners();
   }
 
@@ -144,7 +143,7 @@ class CameraGaugeSource extends PressureSource {
   @override
   void prepareForShot() {
     _reader?.resetTracking();
-    _recent.clear();
+    filter.reset();
     // Freeze focus/exposure so the camera doesn't hunt during the shot.
     final c = _controller;
     if (c != null) {
@@ -189,14 +188,15 @@ class CameraGaugeSource extends PressureSource {
 
       final r = reader.read(frame);
       lastReading = r;
-      double? bar;
-      if (r != null && r.isValid) {
-        _recent.add(r.value);
-        if (_recent.length > 3) _recent.removeAt(0);
-        final s = List.of(_recent)..sort();
-        bar = s[s.length ~/ 2];
-      }
-      _latest = PressureSample(at: now, bar: bar, reading: r);
+      final raw = r != null && r.isValid ? r.value : null;
+      final bar = filter.update(raw, now.microsecondsSinceEpoch / 1e6);
+      _latest = PressureSample(
+        at: now,
+        bar: bar,
+        reading: r,
+        rawBar: raw,
+        rejected: filter.lastRejected,
+      );
       _ctrl.add(_latest!);
 
       if (wantRoi && !_roiBusy && now.difference(_lastRoi).inMilliseconds > 90) {

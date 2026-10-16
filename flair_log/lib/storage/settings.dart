@@ -61,6 +61,15 @@ class Settings extends ChangeNotifier {
   double get targetYield => _prefs.getDouble('targetYield') ?? 0;
   set targetYield(double v) => _set('targetYield', v);
 
+  /// Smooth the needle reading (removes flicker, little lag while pulling).
+  bool get smoothGauge => _prefs.getBool('smoothGauge') ?? true;
+  set smoothGauge(bool v) => _set('smoothGauge', v);
+
+  /// Drop readings that would need a faster pressure change than a hand on
+  /// the lever can produce (misdetections), instead of graphing them.
+  bool get rejectGaugeJumps => _prefs.getBool('rejectGaugeJumps') ?? true;
+  set rejectGaugeJumps(bool v) => _set('rejectGaugeJumps', v);
+
   double get lastDose => _prefs.getDouble('lastDose') ?? 18;
   set lastDose(double v) => _set('lastDose', v);
 

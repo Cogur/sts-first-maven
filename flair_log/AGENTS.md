@@ -8,6 +8,7 @@ Always-on routing for work inside `flair_log/`. Overview and code map: [`README.
 |---|---|
 | APK, build, install, CI, release page | [`../docs/build-apk.md`](../docs/build-apk.md) (shared), then [`docs/BUILD_APK.md`](docs/BUILD_APK.md) (app specifics) |
 | gauge, needle, calibration, tracking, camera, zoom | `lib/vision/` — algorithm notes in `gauge_reader.dart` header; tests in `test/gauge_reader_test.dart` |
+| flicker, jumps, smoothing, filter, noisy pressure | `lib/vision/needle_filter.dart` (thresholds documented in its header); tests in `test/needle_filter_test.dart` |
 | scale, BOOKOO, Bluetooth, BLE | `lib/scale/` — protocol source in `bookoo_protocol.dart` header |
 | recording, auto start/stop, flow | `lib/brew/brew_session.dart` |
 | chart, graph | `lib/ui/widgets/brew_chart.dart` (three panels, one time axis, no dual axes) |

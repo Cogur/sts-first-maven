@@ -8,6 +8,7 @@ import '../app_scope.dart';
 import '../brew/brew_session.dart';
 import '../models/shot.dart';
 import '../scale/scale.dart';
+import '../storage/settings.dart';
 import '../vision/camera_gauge_source.dart';
 import '../vision/pressure_source.dart';
 import 'calibration_screen.dart';
@@ -27,6 +28,7 @@ class _BrewScreenState extends State<BrewScreen> {
   late final PressureSource _source;
   late final BrewSession _session;
   late final TextEditingController _dose;
+  late final Settings _settings;
   bool _demo = false;
   bool _init = false;
 
@@ -46,16 +48,25 @@ class _BrewScreenState extends State<BrewScreen> {
       ..onFinished = _onFinished;
     _dose = TextEditingController(text: app.settings.lastDose.toStringAsFixed(1));
     app.scales.reconnectLast();
+    _settings = app.settings..addListener(_syncFilter);
+    _syncFilter();
     WakelockPlus.enable().catchError((_) {});
   }
 
   @override
   void dispose() {
+    _settings.removeListener(_syncFilter);
     WakelockPlus.disable().catchError((_) {});
     _session.dispose();
     _source.dispose();
     _dose.dispose();
     super.dispose();
+  }
+
+  void _syncFilter() {
+    _source.filter
+      ..smooth = _settings.smoothGauge
+      ..rejectJumps = _settings.rejectGaugeJumps;
   }
 
   Future<void> _onFinished(Shot shot) async {
@@ -99,6 +110,31 @@ class _BrewScreenState extends State<BrewScreen> {
               icon: const Icon(Icons.center_focus_strong),
               onPressed: _session.state == BrewState.recording ? null : _calibrate,
             ),
+          ListenableBuilder(
+            listenable: _settings,
+            builder: (context, _) => PopupMenuButton<String>(
+              tooltip: 'Gauge reading',
+              icon: const Icon(Icons.tune),
+              onSelected: (v) {
+                if (v == 'smooth') _settings.smoothGauge = !_settings.smoothGauge;
+                if (v == 'jumps') {
+                  _settings.rejectGaugeJumps = !_settings.rejectGaugeJumps;
+                }
+              },
+              itemBuilder: (_) => [
+                CheckedPopupMenuItem(
+                  value: 'smooth',
+                  checked: _settings.smoothGauge,
+                  child: const Text('Smooth gauge movement'),
+                ),
+                CheckedPopupMenuItem(
+                  value: 'jumps',
+                  checked: _settings.rejectGaugeJumps,
+                  child: const Text('Ignore impossible jumps'),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
       body: SafeArea(
