@@ -70,5 +70,6 @@ flutter test          # gauge reader on synthetic dials, BOOKOO protocol, brew s
 flutter run           # on a connected phone (camera + BLE need a real device)
 ```
 
-The APK is built by GitHub Actions on every push. See
-[docs/BUILD_APK.md](docs/BUILD_APK.md).
+The APK is built by GitHub Actions on every push: the shared process is in
+[../docs/build-apk.md](../docs/build-apk.md), and what is specific to this app is in
+[docs/BUILD_APK.md](docs/BUILD_APK.md). Agents: start at [AGENTS.md](AGENTS.md).
