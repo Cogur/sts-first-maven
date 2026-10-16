@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -46,6 +45,12 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   final _markCtrl = TextEditingController(text: '10');
   bool _track = true;
 
+  // Background work in progress: shown with elapsed time and a Cancel button.
+  int _job = 0; // bumped by Cancel; late results of older jobs are ignored
+  int _busySeconds = 0;
+  Timer? _busyTimer;
+  static const _timeout = Duration(seconds: 45);
+
   @override
   void initState() {
     super.initState();
@@ -59,6 +64,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
 
   @override
   void dispose() {
+    _busyTimer?.cancel();
     widget.source.wantRoi = true;
     _still?.dispose();
     _zoom?.dispose();
@@ -80,8 +86,62 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
 
   // ---- step 1: capture and find ------------------------------------------
 
+  Future<void> _captureSafely() async {
+    try {
+      await _capture();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _phase = _Phase.aim;
+          _message = 'Could not take a picture: $e';
+        });
+      }
+    }
+  }
+
+  /// Runs [work] while showing the busy view; returns null if it was
+  /// cancelled, failed or timed out (then [_message] says why).
+  Future<T?> _runBusy<T>(_Phase phase, Future<T> Function() work) async {
+    final job = ++_job;
+    _busyTimer?.cancel();
+    setState(() {
+      _phase = phase;
+      _busySeconds = 0;
+      _message = null;
+    });
+    _busyTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _busySeconds++);
+    });
+    try {
+      final r = await work().timeout(_timeout);
+      return job == _job ? r : null;
+    } on TimeoutException {
+      if (job == _job) {
+        _message = 'This took too long. Zoom in on the gauge a little and try again.';
+      }
+      return null;
+    } catch (e) {
+      if (job == _job) _message = 'Something went wrong: $e';
+      return null;
+    } finally {
+      if (job == _job) _busyTimer?.cancel();
+    }
+  }
+
+  void _cancelBusy() {
+    _job++;
+    _busyTimer?.cancel();
+    setState(() {
+      _message = null;
+      _phase = _phase == _Phase.analysing ? _Phase.pick : _Phase.aim;
+    });
+  }
+
+  // ---- step 1: capture and find ------------------------------------------
+
   Future<void> _capture() async {
-    final f = await widget.source.grabFrame();
+    final f = await widget.source.grabFrame().timeout(const Duration(seconds: 5),
+        onTimeout: () => throw TimeoutException('no camera frame'));
     final k = math.min(1.0, 900 / f.uprightWidth);
     final still = await _image(f, 0, 0, f.uprightWidth.toDouble(),
         f.uprightHeight.toDouble(), (f.uprightWidth * k).round(), (f.uprightHeight * k).round());
@@ -91,16 +151,14 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
       _still = still;
       _frame = f;
       _dials = [];
-      _message = null;
-      _phase = _Phase.finding;
     });
-    final dials = await Isolate.run(() => GaugeSetup.findDials(f));
-    if (!mounted) return;
+    final dials = await _runBusy(_Phase.finding, () => GaugeSetup.findDialsInBackground(f));
+    if (!mounted || _phase != _Phase.finding) return; // cancelled
     setState(() {
-      _dials = dials;
+      _dials = dials ?? [];
       _selected = 0;
       _phase = _Phase.pick;
-      _message = dials.isEmpty
+      _message ??= _dials.isEmpty
           ? 'No gauge found automatically. Tap on the gauge, or zoom in and retake.'
           : null;
     });
@@ -117,7 +175,14 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
     // Otherwise look for a dial right there.
     final f = _frame!;
     setState(() => _message = 'Looking for a gauge there…');
-    final found = await Isolate.run(() => GaugeSetup.findDials(f, tapX: fx, tapY: fy));
+    List<DialGeometry> found;
+    try {
+      found = await GaugeSetup.findDialsInBackground(f, tapX: fx, tapY: fy)
+          .timeout(_timeout);
+    } catch (e) {
+      if (mounted) setState(() => _message = 'Search failed: $e');
+      return;
+    }
     if (!mounted) return;
     setState(() {
       if (found.isEmpty) {
@@ -135,8 +200,12 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   Future<void> _analyse() async {
     final f = _frame!;
     final face = _dials[_selected];
-    setState(() => _phase = _Phase.analysing);
-    final a = await Isolate.run(() => GaugeSetup.analyse(f, face));
+    final a = await _runBusy(_Phase.analysing, () => GaugeSetup.analyseInBackground(f, face));
+    if (!mounted || _phase != _Phase.analysing) return; // cancelled
+    if (a == null) {
+      setState(() => _phase = _Phase.pick);
+      return;
+    }
     final region = GaugeSetup.zoomRegion(a.face);
     final zoom = await _image(f, region.$1, region.$2, region.$3, region.$3, 720, 720);
     if (!mounted) return;
@@ -193,9 +262,11 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   Widget build(BuildContext context) {
     final body = switch (_phase) {
       _Phase.aim => _aimView(),
-      _Phase.finding => _busy('Looking for the gauge…'),
+      _Phase.finding => _busy('Looking for the gauge…',
+          'Searching the whole picture for a round dial. Usually 1–3 seconds.'),
       _Phase.pick => _pickView(),
-      _Phase.analysing => _busy('Finding the needle…'),
+      _Phase.analysing => _busy('Finding the needle…',
+          'Locating the needle pivot and its rest position.'),
       _Phase.scale => _scaleView(),
     };
     return Scaffold(
@@ -213,12 +284,19 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
     );
   }
 
-  Widget _busy(String text) => Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          Text(text),
-        ]),
+  Widget _busy(String title, String detail) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text('$detail\n$_busySeconds s', textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            OutlinedButton(onPressed: _cancelBusy, child: const Text('Cancel')),
+          ]),
+        ),
       );
 
   Widget _aimView() {
@@ -262,10 +340,16 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
                 ),
               ]),
             ),
+            if (_message != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(_message!,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: FilledButton.icon(
-                onPressed: c?.value.isInitialized == true ? _capture : null,
+                onPressed: c?.value.isInitialized == true ? _captureSafely : null,
                 icon: const Icon(Icons.search),
                 label: const Text('Find the gauge'),
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),

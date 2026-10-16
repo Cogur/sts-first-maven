@@ -31,6 +31,12 @@ see wrong / missing pressure readings.
   straight dark line. Pivot = hub candidate *on* the line.
 - **Circular Hough is biased for ellipses** (normals of an ellipse miss the centre), so an ellipse fit
   is final and is validated by the face score, not by the Hough centre.
+- **Background work goes through `compute(topLevelFunction, request)`** (`GaugeSetup.findDialsInBackground`,
+  `analyseInBackground`), never `Isolate.run(() => ...)` in widget code. A closure shares its captured
+  context with the other closures of the same method; one holding a `ui.Image` or the `State` makes
+  the send fail ("object is unsendable"). That once left calibration stuck on "Looking for the gauge…".
+  Long steps show elapsed time, a Cancel button and a 45 s timeout. Regression test:
+  `test/background_task_test.dart`.
 - The *first* calibration (old app) failed because the tapped circle was 1.5× the face: half of each
   needle ray sampled the black rim, and tracking followed the background.
 

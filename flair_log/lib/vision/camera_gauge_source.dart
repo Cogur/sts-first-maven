@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'dart:io' show Platform;
-import 'dart:isolate';
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 
-import 'dial_locator.dart';
+import 'gauge_setup.dart';
 import 'gauge_calibration.dart';
 import 'gauge_reader.dart';
 import 'luma_frame.dart';
@@ -238,11 +237,12 @@ class CameraGaugeSource extends PressureSource {
     _refinding = true;
     _lastRefind = now;
     final r = reader.calibration.face(frame.uprightWidth, frame.uprightHeight).radius;
-    final copy = frame.copy();
-    Isolate.run(() => DialLocator.find(copy,
-            maxResults: 1, minRadius: 0.75 * r, maxRadius: 1.33 * r))
+    GaugeSetup.findDialsInBackground(frame.copy(),
+            maxResults: 1, minRadius: 0.75 * r, maxRadius: 1.33 * r)
         .then((found) {
       if (found.isNotEmpty && !_disposed) reader.reacquire(found.first);
+    }).catchError((Object e) {
+      debugPrint('re-find failed: $e');
     }).whenComplete(() => _refinding = false);
   }
 

@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
+
 import 'dial_geometry.dart';
 import 'dial_locator.dart';
 import 'gauge_calibration.dart';
@@ -31,9 +33,66 @@ class DialAnalysis {
       restAngle != null && restConfidence >= GaugeReader.minConfidence;
 }
 
-/// Calibration steps as pure functions, so the UI can run them on a
-/// background isolate (`Isolate.run`).
+// ---- background tasks -------------------------------------------------------
+//
+// Work is sent to another isolate with `compute(topLevelFunction, request)`,
+// never with `Isolate.run(() => ...)` from widget code: a closure shares its
+// captured context with the other closures of the same method (setState
+// callbacks holding ui.Image, the State, ...), and sending that fails with
+// "object is unsendable". That bug left calibration stuck on "Looking for
+// the gauge…". Requests below contain only sendable data.
+
+class FindRequest {
+  const FindRequest(this.frame,
+      {this.tapX, this.tapY, this.minRadius, this.maxRadius, this.maxResults = 4});
+  final LumaFrame frame;
+  final double? tapX, tapY, minRadius, maxRadius;
+  final int maxResults;
+}
+
+List<DialGeometry> findDialsTask(FindRequest r) => DialLocator.find(r.frame,
+    hintX: r.tapX,
+    hintY: r.tapY,
+    minRadius: r.minRadius,
+    maxRadius: r.maxRadius,
+    maxResults: r.maxResults);
+
+class AnalyseRequest {
+  const AnalyseRequest(this.frame, this.face);
+  final LumaFrame frame;
+  final DialGeometry face;
+}
+
+DialAnalysis analyseTask(AnalyseRequest r) => GaugeSetup.analyse(r.frame, r.face);
+
+/// Calibration steps as pure functions; the `...InBackground` variants run
+/// them on another isolate.
 class GaugeSetup {
+  static Future<List<DialGeometry>> findDialsInBackground(LumaFrame f,
+          {double? tapX, double? tapY, double? minRadius, double? maxRadius, int maxResults = 4}) =>
+      _background(
+          findDialsTask,
+          FindRequest(f,
+              tapX: tapX,
+              tapY: tapY,
+              minRadius: minRadius,
+              maxRadius: maxRadius,
+              maxResults: maxResults));
+
+  static Future<DialAnalysis> analyseInBackground(LumaFrame f, DialGeometry face) =>
+      _background(analyseTask, AnalyseRequest(f, face));
+
+  /// Runs [task] on another isolate; if that is not possible, on this one
+  /// (a short freeze is better than hanging forever).
+  static Future<R> _background<Q, R>(R Function(Q) task, Q request) async {
+    try {
+      return await compute(task, request);
+    } catch (e) {
+      debugPrint('Background task failed ($e), running it here instead');
+      return task(request);
+    }
+  }
+
   /// Step 1: candidate dials in the whole frame (best first). With a tap
   /// position only dials around that point are considered.
   static List<DialGeometry> findDials(LumaFrame f, {double? tapX, double? tapY}) =>
