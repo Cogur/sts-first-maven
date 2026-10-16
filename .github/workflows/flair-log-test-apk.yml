@@ -1,0 +1,85 @@
+name: Flair Log test APK
+
+# Builds an installable Flair Log APK on every push that touches the app.
+# The APK is attached to the run (Artifacts) and published as a pre-release on
+# the Releases page, which is the easiest way to download it on a phone.
+# See flair_log/docs/BUILD_APK.md.
+
+on:
+  push:
+    paths:
+      - 'flair_log/**'
+      - '.github/workflows/flair-log-test-apk.yml'
+  pull_request:
+    paths:
+      - 'flair_log/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # publish the APK as a pre-release on the Releases page
+
+concurrency:
+  group: flair-log-test-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: flair_log
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      # Keep the same debug signing key between runs so a new build installs
+      # over the previous one instead of requiring an uninstall.
+      - name: Restore debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: flair-log-debug-keystore-v1
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+      - name: Build APK
+        run: |
+          flutter build apk --release --build-number=$((1000 + GITHUB_RUN_NUMBER))
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             "build/app/outputs/flutter-apk/flair-log-${GITHUB_RUN_NUMBER}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flair-log-apk-${{ github.run_number }}
+          path: flair_log/build/app/outputs/flutter-apk/flair-log-*.apk
+          retention-days: 14
+
+      # A plain download link that works on a phone (no zip, no sign-in for
+      # public repos). Pushes only, not PRs.
+      - name: Publish APK on the Releases page
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: flair-log-${{ github.run_number }}
+          name: Flair Log build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          files: flair_log/build/app/outputs/flutter-apk/flair-log-*.apk
+          body: |
+            Test build of Flair Log from `${{ github.ref_name }}` @ ${{ github.sha }}.
+            Open this page on your Android phone, download the .apk and open it.
+            Debug-signed: for personal testing only.
