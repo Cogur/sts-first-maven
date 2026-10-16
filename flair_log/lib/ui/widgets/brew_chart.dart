@@ -80,6 +80,7 @@ class _BrewChartState extends State<BrewChart> {
             muted: theme.colorScheme.onSurfaceVariant,
             grid: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
             surface: theme.colorScheme.surface,
+            fontFamily: theme.textTheme.bodySmall?.fontFamily,
           ),
         ),
       );
@@ -97,6 +98,7 @@ class _ChartPainter extends CustomPainter {
     required this.muted,
     required this.grid,
     required this.surface,
+    this.fontFamily,
   });
 
   final List<ShotSample> samples;
@@ -104,6 +106,7 @@ class _ChartPainter extends CustomPainter {
   final double minSeconds;
   final double? scrubX;
   final Color text, muted, grid, surface;
+  final String? fontFamily;
 
   static const _left = 34.0;
   static const _right = 8.0;
@@ -274,6 +277,7 @@ class _ChartPainter extends CustomPainter {
         text: s,
         style: TextStyle(
           color: color,
+          fontFamily: fontFamily,
           fontSize: size,
           fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
           fontFeatures: const [FontFeature.tabularFigures()],
