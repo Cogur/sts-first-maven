@@ -147,9 +147,20 @@ class AuthController extends ChangeNotifier {
 
     final route = await _connections.resolve(nvr.id, force: true);
     if (!route.reachable) {
+      final configured = _registry.firstOfKind(DeviceKind.nvr)!;
+      // Distinguish "wrong address / not on Wi-Fi" from "NVR found, but its
+      // RTSP video port is closed or different" — the common case on TVT
+      // recorders where RTSP is disabled or moved in the port settings.
+      if (lanHost.isNotEmpty && await _connections.isPortOpen(lanHost, configured.httpPort)) {
+        throw LoginException(
+          'Found the NVR at $lanHost, but its video (RTSP) port ${configured.rtspPort} does not answer. '
+          'On the NVR open Function Panel → Network → Port: enable RTSP and check the RTSP port. '
+          'If it is not ${configured.rtspPort}, enter it after the IP, e.g. $lanHost:8554.',
+        );
+      }
       throw LoginException(
         lanHost.isNotEmpty && remote.isEmpty
-            ? 'NVR not found at $lanHost. Check that the phone is on the same Wi-Fi.'
+            ? 'NVR not found at $lanHost. Check the IP and that the phone is on the same Wi-Fi.'
             : 'NVR is unreachable on both local and remote addresses.',
       );
     }

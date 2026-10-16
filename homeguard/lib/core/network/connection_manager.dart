@@ -82,7 +82,7 @@ class ConnectionManager extends ChangeNotifier {
     TcpProbe probe = defaultTcpProbe,
     HostLookup lookup = InternetAddress.lookup,
     Stream<List<ConnectivityResult>>? connectivity,
-    this.lanTimeout = const Duration(milliseconds: 800),
+    this.lanTimeout = const Duration(milliseconds: 1500),
     this.remoteTimeout = const Duration(seconds: 3),
     this.cacheTtl = const Duration(seconds: 30),
   }) : _probe = probe,
@@ -131,6 +131,10 @@ class ConnectionManager extends ChangeNotifier {
     _inflight.clear();
     notifyListeners();
   }
+
+  /// One-off TCP check, used for diagnostics (e.g. "web page answers but
+  /// the video port is closed").
+  Future<bool> isPortOpen(String host, int port) async => await _probe(host, port, lanTimeout) != null;
 
   Future<ResolvedRoute> resolve(String deviceId, {bool force = false}) {
     final host = _hostDevice(deviceId);

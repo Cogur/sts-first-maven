@@ -199,6 +199,22 @@ void main() {
     );
   });
 
+  test('web page reachable but RTSP closed explains the port setting', () async {
+    up = {'192.168.1.200:80'};
+    final auth = build();
+    await auth.init();
+    await expectLater(
+      auth.signIn(
+        host: '192.168.1.200',
+        username: 'a',
+        password: 'pw',
+        remember: false,
+        enableBiometrics: false,
+      ),
+      throwsA(isA<LoginException>().having((e) => e.message, 'message', contains('video (RTSP) port 554'))),
+    );
+  });
+
   test('remote VPN route is used when LAN is down', () async {
     up = {'10.8.0.2:554'};
     final auth = build();
