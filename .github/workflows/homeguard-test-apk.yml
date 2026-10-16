@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # publish the APK as a pre-release on the Releases page
 
 concurrency:
   group: homeguard-test-apk-${{ github.ref }}
@@ -61,3 +61,20 @@ jobs:
           name: homeguard-test-apk-${{ github.run_number }}
           path: homeguard/build/app/outputs/flutter-apk/homeguard-test-*.apk
           retention-days: 14
+
+      # A plain download link that works on a phone (no zip, no sign-in for
+      # public repos): Releases page, newest first. Pushes only, not PRs.
+      - name: Publish APK on the Releases page
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: homeguard-test-${{ github.run_number }}
+          name: HomeGuard Test build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          files: homeguard/build/app/outputs/flutter-apk/homeguard-test-*.apk
+          body: |
+            Test build of HomeGuard from `${{ github.ref_name }}` @ ${{ github.sha }}.
+            Download the .apk below on your Android phone (Android 9+) and open it.
+            Installs as "HomeGuard Test". Debug-signed: for testing only.
