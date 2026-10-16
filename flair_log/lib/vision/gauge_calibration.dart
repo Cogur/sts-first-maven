@@ -1,120 +1,116 @@
+import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
-/// Describes where the pressure gauge is in the camera image and how to turn
-/// a needle angle into bar.
+import 'dial_geometry.dart';
+
+/// Everything the reader needs to know about one gauge in one camera setup.
 ///
-/// Positions are stored in *normalised upright* coordinates (0..1 of the
-/// upright frame width/height) so they survive small resolution changes.
-/// Angles are in radians in screen space (x right, y down), so increasing
-/// angle means clockwise — the direction a pressure gauge needle travels.
+/// Positions are fractions of the upright frame (x of width, y of height,
+/// radii of width) so they survive resolution changes. Angles are *dial
+/// angles* (see [DialGeometry.point]); increasing angle is clockwise on
+/// screen, the direction a pressure needle travels.
 class GaugeCalibration {
   const GaugeCalibration({
-    required this.centerX,
-    required this.centerY,
-    required this.radius,
+    required this.faceX,
+    required this.faceY,
+    required this.faceRx,
+    required this.faceRy,
+    this.tilt = 0,
+    this.pivotDx = 0,
+    this.pivotDy = 0,
     required this.zeroAngle,
     required this.sweep,
     this.minValue = 0,
-    this.maxValue = 16,
+    this.maxValue = 10,
     this.polarity = 1,
     this.trackMovement = true,
     this.zoom = 1.0,
-    this.reference,
+    this.faceScore = 0,
+    this.background,
+    this.template,
   });
 
-  /// Dial centre, fraction of upright frame width / height.
-  final double centerX;
-  final double centerY;
+  static const version = 2;
 
-  /// Dial face radius as a fraction of the upright frame width.
-  final double radius;
+  /// Dial face ellipse (as found by the DialLocator).
+  final double faceX, faceY, faceRx, faceRy, tilt;
 
-  /// Angle of the [minValue] mark.
+  /// Needle pivot relative to the face centre, in face radii. The face can
+  /// look off-centre from an oblique view; the needle turns around the pivot.
+  final double pivotDx, pivotDy;
+
+  /// Dial angle of the [minValue] mark (the needle at rest = 0 bar).
   final double zeroAngle;
 
-  /// Clockwise angle from the [minValue] mark to the [maxValue] mark.
+  /// Clockwise dial angle from the [minValue] mark to the [maxValue] mark.
   final double sweep;
 
-  /// Values printed at the two calibration marks (bar).
-  final double minValue;
-  final double maxValue;
+  /// Values at the two reference marks (bar). [maxValue] is the mark the
+  /// user tapped (10 on the Flair gauge); readings beyond it extrapolate.
+  final double minValue, maxValue;
 
-  /// +1 when the needle is darker than the dial face, -1 when lighter.
+  /// +1: needle darker than the face; -1: lighter.
   final int polarity;
 
-  /// The Flair 58 gauge sits on the piston stem and moves down during the
-  /// shot, so by default the reader follows it.
+  /// The Flair 58 gauge sits on the piston stem and moves during the shot.
   final bool trackMovement;
 
-  /// Camera zoom level that was active during calibration.
+  /// Camera zoom during calibration.
   final double zoom;
 
-  /// Appearance signature of the bezel used for tracking (see GaugeReader).
-  final List<double>? reference;
+  /// Face contrast at calibration; tracking is "lost" well below this.
+  final double faceScore;
 
-  /// Converts an angle (radians, screen space) to a gauge value.
-  double valueForAngle(double angle) {
-    final offset = clockwiseFromZero(angle);
-    return minValue + offset / sweep * (maxValue - minValue);
+  /// What the empty dial looks like, learned while brewing.
+  final GaugeBackground? background;
+
+  /// Appearance of the face edge, bands and rim at calibration, used to
+  /// follow the gauge (see GaugeReader.track).
+  final Uint8List? template;
+
+  /// Face ellipse in pixels of a frame of the given upright size.
+  DialGeometry face(int w, int h) => DialGeometry(
+        cx: faceX * w,
+        cy: faceY * h,
+        rx: faceRx * w,
+        ry: faceRy * w,
+        tilt: tilt,
+        score: faceScore,
+      );
+
+  /// Sampling geometry for the needle: the face shape around the pivot.
+  static DialGeometry needleGeometry(DialGeometry face, double pdx, double pdy) {
+    final r = face.radius;
+    return face.moved(face.cx + pdx * r, face.cy + pdy * r);
   }
 
-  /// Clockwise angular distance from the zero mark, mapped into
-  /// [-(2π - sweep)/2, sweep + (2π - sweep)/2) so that small negative
-  /// readings (needle resting just below zero) stay negative.
-  double clockwiseFromZero(double angle) {
-    var d = _wrap(angle - zeroAngle);
-    final dead = 2 * math.pi - sweep;
-    if (d > sweep + dead / 2) d -= 2 * math.pi;
-    return d;
-  }
+  double valueForAngle(double angle) =>
+      minValue + clockwiseFromZero(angle) / sweep * (maxValue - minValue);
 
   double angleForValue(double value) =>
       zeroAngle + (value - minValue) / (maxValue - minValue) * sweep;
+
+  /// Clockwise distance from the zero mark in (-40°, 320°]: the needle can
+  /// rest slightly below zero but never travels backwards a long way.
+  double clockwiseFromZero(double angle) {
+    var d = _wrap(angle - zeroAngle);
+    if (d > 2 * math.pi - _below) d -= 2 * math.pi;
+    return d;
+  }
+
+  static const double _below = 40 * math.pi / 180;
+
+  /// Dial angles the reader searches: from a little below zero to 320°.
+  (double, double) get searchRange => (zeroAngle - 25 * math.pi / 180,
+      zeroAngle + math.min(2 * math.pi - _below, math.max(sweep * 1.6, 270 * math.pi / 180)));
 
   static double _wrap(double a) {
     final t = a % (2 * math.pi);
     return t < 0 ? t + 2 * math.pi : t;
   }
 
-  /// Builds a calibration from three taps in upright pixel coordinates.
-  factory GaugeCalibration.fromTaps({
-    required double frameWidth,
-    required double frameHeight,
-    required double cx,
-    required double cy,
-    required double zeroX,
-    required double zeroY,
-    required double maxX,
-    required double maxY,
-    double minValue = 0,
-    double maxValue = 16,
-    double? radiusPx,
-  }) {
-    final a0 = math.atan2(zeroY - cy, zeroX - cx);
-    final a1 = math.atan2(maxY - cy, maxX - cx);
-    var sweep = _wrap(a1 - a0);
-    if (sweep < 0.2) sweep = 2 * math.pi - 0.01;
-    final r = radiusPx ??
-        1.1 *
-            math.max(
-              math.sqrt(math.pow(zeroX - cx, 2) + math.pow(zeroY - cy, 2)),
-              math.sqrt(math.pow(maxX - cx, 2) + math.pow(maxY - cy, 2)),
-            );
-    return GaugeCalibration(
-      centerX: cx / frameWidth,
-      centerY: cy / frameHeight,
-      radius: r / frameWidth,
-      zeroAngle: a0,
-      sweep: sweep,
-      minValue: minValue,
-      maxValue: maxValue,
-    );
-  }
-
   GaugeCalibration copyWith({
-    double? centerX,
-    double? centerY,
-    double? radius,
     double? zeroAngle,
     double? sweep,
     double? minValue,
@@ -122,12 +118,16 @@ class GaugeCalibration {
     int? polarity,
     bool? trackMovement,
     double? zoom,
-    List<double>? reference,
+    GaugeBackground? background,
   }) =>
       GaugeCalibration(
-        centerX: centerX ?? this.centerX,
-        centerY: centerY ?? this.centerY,
-        radius: radius ?? this.radius,
+        faceX: faceX,
+        faceY: faceY,
+        faceRx: faceRx,
+        faceRy: faceRy,
+        tilt: tilt,
+        pivotDx: pivotDx,
+        pivotDy: pivotDy,
         zeroAngle: zeroAngle ?? this.zeroAngle,
         sweep: sweep ?? this.sweep,
         minValue: minValue ?? this.minValue,
@@ -135,13 +135,62 @@ class GaugeCalibration {
         polarity: polarity ?? this.polarity,
         trackMovement: trackMovement ?? this.trackMovement,
         zoom: zoom ?? this.zoom,
-        reference: reference ?? this.reference,
+        faceScore: faceScore,
+        background: background ?? this.background,
+        template: template,
       );
 
+  /// Builds a calibration from a located face, a pivot and the dial angles of
+  /// the zero mark and one numbered mark.
+  factory GaugeCalibration.fromDial({
+    required DialGeometry face,
+    required double pivotX,
+    required double pivotY,
+    required int frameWidth,
+    required int frameHeight,
+    required double zeroAngle,
+    required double markAngle,
+    required double markValue,
+    double minValue = 0,
+    int polarity = 1,
+    bool trackMovement = true,
+    double zoom = 1,
+    GaugeBackground? background,
+    Uint8List? template,
+  }) {
+    var sweep = _wrap(markAngle - zeroAngle);
+    if (sweep < 0.05) sweep = 2 * math.pi - 0.01;
+    final r = face.radius;
+    return GaugeCalibration(
+      faceX: face.cx / frameWidth,
+      faceY: face.cy / frameHeight,
+      faceRx: face.rx / frameWidth,
+      faceRy: face.ry / frameWidth,
+      tilt: face.tilt,
+      pivotDx: (pivotX - face.cx) / r,
+      pivotDy: (pivotY - face.cy) / r,
+      zeroAngle: zeroAngle,
+      sweep: sweep,
+      minValue: minValue,
+      maxValue: markValue,
+      polarity: polarity,
+      trackMovement: trackMovement,
+      zoom: zoom,
+      faceScore: face.score,
+      background: background,
+      template: template,
+    );
+  }
+
   Map<String, dynamic> toJson() => {
-        'centerX': centerX,
-        'centerY': centerY,
-        'radius': radius,
+        'version': version,
+        'faceX': faceX,
+        'faceY': faceY,
+        'faceRx': faceRx,
+        'faceRy': faceRy,
+        'tilt': tilt,
+        'pivotDx': pivotDx,
+        'pivotDy': pivotDy,
         'zeroAngle': zeroAngle,
         'sweep': sweep,
         'minValue': minValue,
@@ -149,23 +198,79 @@ class GaugeCalibration {
         'polarity': polarity,
         'trackMovement': trackMovement,
         'zoom': zoom,
-        if (reference != null) 'reference': reference,
+        'faceScore': faceScore,
+        if (background != null) 'background': background!.toJson(),
+        if (template != null) 'template': base64Encode(template!),
       };
 
-  factory GaugeCalibration.fromJson(Map<String, dynamic> j) =>
-      GaugeCalibration(
-        centerX: (j['centerX'] as num).toDouble(),
-        centerY: (j['centerY'] as num).toDouble(),
-        radius: (j['radius'] as num).toDouble(),
-        zeroAngle: (j['zeroAngle'] as num).toDouble(),
-        sweep: (j['sweep'] as num).toDouble(),
-        minValue: (j['minValue'] as num?)?.toDouble() ?? 0,
-        maxValue: (j['maxValue'] as num?)?.toDouble() ?? 16,
-        polarity: (j['polarity'] as num?)?.toInt() ?? 1,
-        trackMovement: j['trackMovement'] as bool? ?? true,
-        zoom: (j['zoom'] as num?)?.toDouble() ?? 1.0,
-        reference: (j['reference'] as List?)
-            ?.map((e) => (e as num).toDouble())
-            .toList(),
-      );
+  /// Returns null for calibrations from older app versions (they must be
+  /// redone with the new finder).
+  static GaugeCalibration? fromJson(Map<String, dynamic> j) {
+    if (j['version'] != version) return null;
+    double d(String k, [double def = 0]) => (j[k] as num?)?.toDouble() ?? def;
+    return GaugeCalibration(
+      faceX: d('faceX'),
+      faceY: d('faceY'),
+      faceRx: d('faceRx'),
+      faceRy: d('faceRy'),
+      tilt: d('tilt'),
+      pivotDx: d('pivotDx'),
+      pivotDy: d('pivotDy'),
+      zeroAngle: d('zeroAngle'),
+      sweep: d('sweep', math.pi),
+      minValue: d('minValue'),
+      maxValue: d('maxValue', 10),
+      polarity: (j['polarity'] as num?)?.toInt() ?? 1,
+      trackMovement: j['trackMovement'] as bool? ?? true,
+      zoom: d('zoom', 1),
+      faceScore: d('faceScore'),
+      background: j['background'] == null
+          ? null
+          : GaugeBackground.fromJson(j['background'] as Map<String, dynamic>),
+      template: j['template'] == null ? null : base64Decode(j['template'] as String),
+    );
+  }
+}
+
+/// The dial face without the needle, in polar coordinates around the pivot:
+/// [angles] dial angles × [radii] ring positions (see GaugeReader). Angles
+/// where the needle has not been seen away from yet are "unknown".
+class GaugeBackground {
+  GaugeBackground(this.values, this.seen);
+
+  GaugeBackground.empty()
+      : values = Float32List(radii * angles),
+        seen = Uint8List(angles);
+
+  static const int angles = 360;
+  static const int radii = 20;
+
+  /// Luma per [radius * angles + angle].
+  final Float32List values;
+
+  /// How often each angle has been observed without the needle (saturates).
+  final Uint8List seen;
+
+  bool known(int a) => seen[a] > 0;
+
+  double get coverage => seen.where((s) => s > 0).length / angles;
+
+  GaugeBackground copy() =>
+      GaugeBackground(Float32List.fromList(values), Uint8List.fromList(seen));
+
+  Map<String, dynamic> toJson() => {
+        'v': base64Encode(Uint8List.fromList(
+            values.map((v) => v.round().clamp(0, 255)).toList())),
+        's': base64Encode(seen),
+      };
+
+  factory GaugeBackground.fromJson(Map<String, dynamic> j) {
+    final v = base64Decode(j['v'] as String);
+    final s = base64Decode(j['s'] as String);
+    if (v.length != radii * angles || s.length != angles) {
+      return GaugeBackground.empty();
+    }
+    return GaugeBackground(
+        Float32List.fromList(v.map((e) => e.toDouble()).toList()), s);
+  }
 }

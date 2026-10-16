@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:isolate';
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 
+import 'dial_locator.dart';
 import 'gauge_calibration.dart';
 import 'gauge_reader.dart';
 import 'luma_frame.dart';
@@ -43,6 +45,13 @@ class CameraGaugeSource extends PressureSource {
   GaugeReading? lastReading;
   RoiView? roi;
 
+  /// Called after a shot with the calibration including what the reader
+  /// learned about the empty dial; the app persists it.
+  void Function(GaugeCalibration calibration)? onLearned;
+
+  bool _refinding = false;
+  DateTime _lastRefind = DateTime.fromMillisecondsSinceEpoch(0);
+
   /// Set to false when nobody is looking at the zoomed view, to save work.
   bool wantRoi = true;
 
@@ -73,7 +82,9 @@ class CameraGaugeSource extends PressureSource {
           orElse: () => cams.first);
       final c = CameraController(
         cam,
-        ResolutionPreset.high,
+        // 1080p: the gauge can be small when the whole machine is in view.
+        // Analysis samples only around the gauge, so cost does not grow.
+        ResolutionPreset.veryHigh,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420,
       );
@@ -154,6 +165,13 @@ class CameraGaugeSource extends PressureSource {
 
   @override
   void shotFinished() {
+    final reader = _reader;
+    final bg = reader?.background;
+    if (reader != null && bg != null) {
+      final learned = reader.calibration.copyWith(background: bg.copy());
+      reader.calibration = learned;
+      onLearned?.call(learned);
+    }
     final c = _controller;
     if (c != null) {
       c.setFocusMode(FocusMode.auto).catchError((_) {});
@@ -188,6 +206,7 @@ class CameraGaugeSource extends PressureSource {
 
       final r = reader.read(frame);
       lastReading = r;
+      if (reader.lostFrames > 20) _refind(frame, reader);
       final raw = r != null && r.isValid ? r.value : null;
       final bar = filter.update(raw, now.microsecondsSinceEpoch / 1e6);
       _latest = PressureSample(
@@ -211,12 +230,28 @@ class CameraGaugeSource extends PressureSource {
     }
   }
 
+  /// The gauge was lost for over a second (bumped phone, fast lever): search
+  /// the whole frame for a dial of the calibrated size, in the background.
+  void _refind(LumaFrame frame, GaugeReader reader) {
+    final now = DateTime.now();
+    if (_refinding || now.difference(_lastRefind).inMilliseconds < 2000) return;
+    _refinding = true;
+    _lastRefind = now;
+    final r = reader.calibration.face(frame.uprightWidth, frame.uprightHeight).radius;
+    final copy = frame.copy();
+    Isolate.run(() => DialLocator.find(copy,
+            maxResults: 1, minRadius: 0.75 * r, maxRadius: 1.33 * r))
+        .then((found) {
+      if (found.isNotEmpty && !_disposed) reader.reacquire(found.first);
+    }).whenComplete(() => _refinding = false);
+  }
+
   void _renderRoi(LumaFrame f, GaugeReading? r) {
     final cal = calibration;
     if (cal == null) return;
-    final cx = r?.centerX ?? cal.centerX * f.uprightWidth;
-    final cy = r?.centerY ?? cal.centerY * f.uprightHeight;
-    final size = cal.radius * f.uprightWidth * 2.7;
+    final face = r?.face ?? cal.face(f.uprightWidth, f.uprightHeight);
+    final cx = face.cx, cy = face.cy;
+    final size = 2.6 * (face.rx > face.ry ? face.rx : face.ry);
     const out = 220;
     final left = cx - size / 2, top = cy - size / 2;
     final rgba = f.toRgba(

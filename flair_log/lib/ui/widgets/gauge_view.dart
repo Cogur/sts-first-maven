@@ -78,30 +78,35 @@ class _GaugePainter extends CustomPainter {
     );
     final r = reading;
     if (r == null) return;
-    Offset map(double x, double y) =>
-        Offset((x - roi.left) * scale, (y - roi.top) * scale);
-    final c = map(r.centerX, r.centerY);
-    final rad = r.radius * scale;
+    Offset map((double, double) p) =>
+        Offset((p.$1 - roi.left) * scale, (p.$2 - roi.top) * scale);
 
+    // Dial face as found in this frame; orange while it is being searched.
     final ring = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5
-      ..color = (r.trackingScore > 0.45 ? Colors.white : Colors.orangeAccent)
+      ..color = (r.tracked ? Colors.white : Colors.orangeAccent)
           .withValues(alpha: 0.7);
-    canvas.drawCircle(c, rad, ring);
-
-    // Min / max marks.
-    for (final a in [cal.zeroAngle, cal.zeroAngle + cal.sweep]) {
-      final d = Offset(math.cos(a), math.sin(a));
-      canvas.drawLine(c + d * rad * 0.88, c + d * rad * 1.05, ring);
+    final face = Path();
+    for (var i = 0; i <= 72; i++) {
+      final o = map(r.face.point(2 * math.pi * i / 72, 1));
+      i == 0 ? face.moveTo(o.dx, o.dy) : face.lineTo(o.dx, o.dy);
     }
+    canvas.drawPath(face, ring);
+
+    // Zero and reference marks.
+    final ng = r.needle;
+    for (final a in [cal.zeroAngle, cal.zeroAngle + cal.sweep]) {
+      canvas.drawLine(map(ng.point(a, 0.88)), map(ng.point(a, 1.0)), ring);
+    }
+
+    void needle(double a, Paint p) =>
+        canvas.drawLine(map(ng.point(a, 0.15)), map(ng.point(a, 0.95)), p);
 
     // Raw detection: thin line, orange when dropped as an impossible jump.
     if (r.isValid) {
-      final d = Offset(math.cos(r.angle), math.sin(r.angle));
-      canvas.drawLine(
-        c + d * rad * 0.2,
-        c + d * rad * 0.95,
+      needle(
+        r.angle,
         Paint()
           ..color = (sample?.rejected ?? false)
               ? Colors.orangeAccent
@@ -113,11 +118,8 @@ class _GaugePainter extends CustomPainter {
     // The value that is shown and recorded (after smoothing / rejection).
     final bar = sample?.bar;
     if (bar != null) {
-      final a = cal.angleForValue(bar);
-      final d = Offset(math.cos(a), math.sin(a));
-      canvas.drawLine(
-        c + d * rad * 0.2,
-        c + d * rad * 0.95,
+      needle(
+        cal.angleForValue(bar),
         Paint()
           ..color = color
           ..strokeWidth = 3

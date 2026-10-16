@@ -7,12 +7,22 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
 
 ## Features
 
-- **Camera gauge reading.** One-time calibration: capture a still, then tap
-  the needle hub, the 0 bar mark and the highest numbered mark. After that
-  the needle is read about 15 times per second.
+- **Finds the gauge by itself.** Frame the whole machine (the gauge can be
+  small in the picture) and tap *Find the gauge*. The app locates the round
+  dial, fits its rim (also as an ellipse when the phone looks at it from an
+  angle), finds the needle pivot, and takes the needle's rest position as
+  0 bar. You only tap one numbered mark (10 on the Flair gauge) on a zoomed
+  view.
+- **Learns your gauge.** While you brew, the app builds a picture of the empty
+  dial. Logo, text and screws then cancel out and the needle stands out more
+  clearly with every shot. The learned picture is saved with the
+  calibration.
 - **Follows the moving gauge.** On the Flair 58 the gauge sits on the piston
-  stem and moves down during the shot. The reader tracks the bezel so the
-  reading stays correct.
+  stem and moves down during the shot. The reader matches the dial's
+  appearance in every frame. If it loses the gauge (a bumped phone), it
+  searches the whole picture again.
+- About 15 readings per second from 1080p video. Details:
+  [docs/gauge-reading.md](docs/gauge-reading.md).
 - **Steady needle.** Two switches (Settings, or the slider icon on the Brew
   screen), both on by default:
   - *Smooth gauge movement* removes flicker. It smooths strongly while the
@@ -46,10 +56,11 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
 1. Mount the phone (a small tripod or phone clamp) so it looks straight at the
    gauge with the lever up. Leave room below the gauge, because it travels
    down. Avoid strong reflections on the gauge glass.
-2. **Brew → target icon → Calibrate.** Zoom in if the gauge is small, then
-   tap *Capture still* and tap the three points. Enter the values printed at
-   the first and last mark. The defaults are 0 and 16; check your gauge
-   face. *Needle found: 0.0 bar* means it works.
+2. **Brew → target icon.** With the lever up, tap *Find the gauge*. Check
+   that the highlighted circle is your gauge (tap another one if not). On the
+   zoomed view the blue line is the needle at 0. Tap the 10 mark and save.
+   If the blue line is not on the needle, choose *Tap sets 0* and tap the 0
+   mark yourself.
 3. Connect the scale (scale icon), put the cup on it, then tap
    **Tare & get ready**.
 4. Pull the shot. Recording starts and stops on its own, or use the buttons.
@@ -58,7 +69,9 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
 
 | Path | What it does |
 |---|---|
-| `lib/vision/gauge_reader.dart` | Needle detection (ray sampling + robust percentile score) and gauge tracking |
+| `lib/vision/dial_locator.dart` | Finds round dials, fits rim (circle/ellipse), hub candidates |
+| `lib/vision/gauge_reader.dart` | Needle detection, learned dial background, appearance tracking |
+| `lib/vision/gauge_setup.dart` | Calibration steps as pure functions (run on a background isolate) |
 | `lib/vision/camera_gauge_source.dart` | Camera image stream → luma frames → readings, zoomed gauge view |
 | `lib/vision/gauge_calibration.dart` | Angle ↔ bar mapping, calibration storage |
 | `lib/vision/needle_filter.dart` | Jump rejection (rate limit + confirmation) and One Euro smoothing of readings |
@@ -79,7 +92,7 @@ return it from `ScaleManager`.
 ```bash
 flutter pub get
 flutter analyze
-flutter test          # gauge reader on synthetic dials, BOOKOO protocol, brew session
+flutter test          # gauge finder/reader on synthetic dials and real photos, BOOKOO, brew session
 flutter run           # on a connected phone (camera + BLE need a real device)
 ```
 

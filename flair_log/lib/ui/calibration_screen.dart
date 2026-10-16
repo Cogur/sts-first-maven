@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -6,12 +8,16 @@ import 'package:flutter/material.dart';
 
 import '../storage/settings.dart';
 import '../vision/camera_gauge_source.dart';
-import '../vision/gauge_calibration.dart';
-import '../vision/gauge_reader.dart';
+import '../vision/dial_geometry.dart';
+import '../vision/gauge_setup.dart';
 import '../vision/luma_frame.dart';
 import 'widgets/brew_chart.dart';
 
-/// Two steps: aim the camera, then mark the dial on a still frame.
+/// Guided calibration:
+/// 1. aim (the whole machine may be in view) and take a still,
+/// 2. the app finds round dials; the user confirms or taps the right one,
+/// 3. the app finds the pivot and the needle at rest (= 0 bar); the user taps
+///    one numbered mark on a zoomed view and enters its number.
 class CalibrationScreen extends StatefulWidget {
   const CalibrationScreen({super.key, required this.source, required this.settings});
 
@@ -22,37 +28,30 @@ class CalibrationScreen extends StatefulWidget {
   State<CalibrationScreen> createState() => _CalibrationScreenState();
 }
 
-enum _Step { center, zero, max, adjust }
+enum _Phase { aim, finding, pick, analysing, scale }
 
 class _CalibrationScreenState extends State<CalibrationScreen> {
+  _Phase _phase = _Phase.aim;
   LumaFrame? _frame;
   ui.Image? _still;
+  List<DialGeometry> _dials = [];
+  int _selected = 0;
+  String? _message;
 
-  Offset? _center, _zero, _max; // upright pixels
-  double _radiusScale = 1.1;
-  final _minCtrl = TextEditingController(text: '0');
-  final _maxCtrl = TextEditingController(text: '16');
+  DialAnalysis? _analysis;
+  ui.Image? _zoom;
+  (double, double, double)? _region; // left, top, size in frame pixels
+  double? _zeroAngle, _markAngle;
+  bool _tapSetsZero = false;
+  final _markCtrl = TextEditingController(text: '10');
   bool _track = true;
-  int? _dragging;
-
-  GaugeCalibration? _preview;
-  GaugeReading? _previewReading;
-
-  _Step get _step => _center == null
-      ? _Step.center
-      : _zero == null
-          ? _Step.zero
-          : _max == null
-              ? _Step.max
-              : _Step.adjust;
 
   @override
   void initState() {
     super.initState();
     final old = widget.source.calibration ?? widget.settings.calibration;
     if (old != null) {
-      _minCtrl.text = _fmt(old.minValue);
-      _maxCtrl.text = _fmt(old.maxValue);
+      _markCtrl.text = _fmt(old.maxValue);
       _track = old.trackMovement;
     }
     widget.source.wantRoi = false;
@@ -62,101 +61,165 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   void dispose() {
     widget.source.wantRoi = true;
     _still?.dispose();
-    _minCtrl.dispose();
-    _maxCtrl.dispose();
+    _zoom?.dispose();
+    _markCtrl.dispose();
     super.dispose();
   }
 
   static String _fmt(double v) =>
       v == v.roundToDouble() ? v.toInt().toString() : v.toString();
 
+  static Future<ui.Image> _image(LumaFrame f, double left, double top,
+      double w, double h, int outW, int outH) {
+    final c = Completer<ui.Image>();
+    final rgba = f.toRgba(
+        left: left, top: top, regionW: w, regionH: h, outW: outW, outH: outH);
+    ui.decodeImageFromPixels(rgba, outW, outH, ui.PixelFormat.rgba8888, c.complete);
+    return c.future;
+  }
+
+  // ---- step 1: capture and find ------------------------------------------
+
   Future<void> _capture() async {
     final f = await widget.source.grabFrame();
-    final maxW = 720;
-    final k = math.min(1.0, maxW / f.uprightWidth);
-    final w = (f.uprightWidth * k).round(), h = (f.uprightHeight * k).round();
-    final rgba = f.toRgba(
-        left: 0,
-        top: 0,
-        regionW: f.uprightWidth.toDouble(),
-        regionH: f.uprightHeight.toDouble(),
-        outW: w,
-        outH: h);
-    ui.decodeImageFromPixels(rgba, w, h, ui.PixelFormat.rgba8888, (img) {
-      if (!mounted) return;
-      setState(() {
-        _still?.dispose();
-        _still = img;
-        _frame = f;
-        _center = _zero = _max = null;
-        _preview = null;
-      });
+    final k = math.min(1.0, 900 / f.uprightWidth);
+    final still = await _image(f, 0, 0, f.uprightWidth.toDouble(),
+        f.uprightHeight.toDouble(), (f.uprightWidth * k).round(), (f.uprightHeight * k).round());
+    if (!mounted) return;
+    setState(() {
+      _still?.dispose();
+      _still = still;
+      _frame = f;
+      _dials = [];
+      _message = null;
+      _phase = _Phase.finding;
+    });
+    final dials = await Isolate.run(() => GaugeSetup.findDials(f));
+    if (!mounted) return;
+    setState(() {
+      _dials = dials;
+      _selected = 0;
+      _phase = _Phase.pick;
+      _message = dials.isEmpty
+          ? 'No gauge found automatically. Tap on the gauge, or zoom in and retake.'
+          : null;
     });
   }
 
-  GaugeCalibration? _build() {
-    final f = _frame;
-    if (f == null || _center == null || _zero == null || _max == null) return null;
-    final minV = double.tryParse(_minCtrl.text.replaceAll(',', '.')) ?? 0;
-    final maxV = double.tryParse(_maxCtrl.text.replaceAll(',', '.')) ?? 16;
-    if (maxV <= minV) return null;
-    final c = _center!;
-    final markR = math.max((_zero! - c).distance, (_max! - c).distance);
-    var cal = GaugeCalibration.fromTaps(
-      frameWidth: f.uprightWidth.toDouble(),
-      frameHeight: f.uprightHeight.toDouble(),
-      cx: c.dx,
-      cy: c.dy,
-      zeroX: _zero!.dx,
-      zeroY: _zero!.dy,
-      maxX: _max!.dx,
-      maxY: _max!.dy,
-      minValue: minV,
-      maxValue: maxV,
-      radiusPx: markR * _radiusScale,
-    ).copyWith(trackMovement: _track, zoom: widget.source.zoom);
-    final probe = GaugeReader(cal);
-    cal = cal.copyWith(polarity: probe.detectPolarity(f));
-    final ref = GaugeReader(cal).captureReference(f);
-    return cal.copyWith(reference: ref);
+  Future<void> _tapStill(double fx, double fy) async {
+    // A tap inside a found dial selects it.
+    for (var i = 0; i < _dials.length; i++) {
+      if (_dials[i].polarOf(fx, fy).$2 <= 1.3) {
+        setState(() => _selected = i);
+        return;
+      }
+    }
+    // Otherwise look for a dial right there.
+    final f = _frame!;
+    setState(() => _message = 'Looking for a gauge there…');
+    final found = await Isolate.run(() => GaugeSetup.findDials(f, tapX: fx, tapY: fy));
+    if (!mounted) return;
+    setState(() {
+      if (found.isEmpty) {
+        _message = 'No round gauge there. Zoom the camera in a little and retake.';
+      } else {
+        _dials = [found.first, ..._dials];
+        _selected = 0;
+        _message = null;
+      }
+    });
   }
 
-  void _refreshPreview() {
-    final cal = _build();
-    _preview = cal;
-    _previewReading = cal == null ? null : GaugeReader(cal).read(_frame!);
+  // ---- step 2: analyse the chosen dial --------------------------------------
+
+  Future<void> _analyse() async {
+    final f = _frame!;
+    final face = _dials[_selected];
+    setState(() => _phase = _Phase.analysing);
+    final a = await Isolate.run(() => GaugeSetup.analyse(f, face));
+    final region = GaugeSetup.zoomRegion(a.face);
+    final zoom = await _image(f, region.$1, region.$2, region.$3, region.$3, 720, 720);
+    if (!mounted) return;
+    setState(() {
+      _analysis = a;
+      _zoom?.dispose();
+      _zoom = zoom;
+      _region = region;
+      _zeroAngle = a.needleFound ? a.restAngle : null;
+      _markAngle = null;
+      _tapSetsZero = !a.needleFound;
+      _phase = _Phase.scale;
+    });
+  }
+
+  void _tapZoom(double fx, double fy) {
+    final a = _analysis!;
+    final angle = GaugeSetup.angleAt(a, fx, fy);
+    setState(() {
+      if (_tapSetsZero) {
+        _zeroAngle = angle;
+        _tapSetsZero = false;
+      } else {
+        _markAngle = angle;
+      }
+    });
+  }
+
+  double? get _markValue {
+    final v = double.tryParse(_markCtrl.text.replaceAll(',', '.'));
+    return v != null && v > 0 ? v : null;
   }
 
   void _save() {
-    final cal = _build();
-    if (cal == null) return;
+    final a = _analysis, z = _zeroAngle, m = _markAngle, v = _markValue;
+    if (a == null || z == null || m == null || v == null) return;
+    final cal = GaugeSetup.build(
+      frame: _frame!,
+      analysis: a,
+      zeroAngle: z,
+      markAngle: m,
+      markValue: v,
+      trackMovement: _track,
+      zoom: widget.source.zoom,
+    );
     widget.settings.calibration = cal;
     widget.source.setCalibration(cal);
     Navigator.of(context).pop(true);
   }
 
+  // ---- UI ------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
+    final body = switch (_phase) {
+      _Phase.aim => _aimView(),
+      _Phase.finding => _busy('Looking for the gauge…'),
+      _Phase.pick => _pickView(),
+      _Phase.analysing => _busy('Finding the needle…'),
+      _Phase.scale => _scaleView(),
+    };
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Calibrate gauge'),
+        title: const Text('Set up gauge'),
         actions: [
-          if (_still != null)
+          if (_phase == _Phase.pick || _phase == _Phase.scale)
             TextButton(
-              onPressed: () => setState(() {
-                _still?.dispose();
-                _still = null;
-                _frame = null;
-              }),
+              onPressed: () => setState(() => _phase = _Phase.aim),
               child: const Text('Retake'),
             ),
         ],
       ),
-      body: SafeArea(child: _still == null ? _aimView() : _markView()),
+      body: SafeArea(child: body),
     );
   }
 
-  // ---- step 1: aim -------------------------------------------------------
+  Widget _busy(String text) => Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          Text(text),
+        ]),
+      );
 
   Widget _aimView() {
     final src = widget.source;
@@ -169,9 +232,10 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                'Mount the phone so it looks straight at the gauge with the lever up. '
-                'Leave room below the gauge — it travels down with the piston. '
-                'Keep the phone in the same place for brewing.',
+                'Put the phone where it will stay while brewing, with the lever up '
+                '(no pressure). The whole machine can be in the picture: the app '
+                'finds the gauge itself. Leave room below the gauge, it moves down '
+                'with the piston.',
               ),
             ),
             Expanded(
@@ -202,8 +266,8 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: FilledButton.icon(
                 onPressed: c?.value.isInitialized == true ? _capture : null,
-                icon: const Icon(Icons.camera),
-                label: const Text('Capture still'),
+                icon: const Icon(Icons.search),
+                label: const Text('Find the gauge'),
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
               ),
             ),
@@ -213,211 +277,166 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
     );
   }
 
-  // ---- step 2: mark ------------------------------------------------------
-
-  String get _instruction => switch (_step) {
-        _Step.center => '1/3  Tap the centre of the needle hub.',
-        _Step.zero => '2/3  Tap the outer end of the 0 bar mark.',
-        _Step.max => '3/3  Tap the outer end of the highest numbered mark.',
-        _Step.adjust =>
-          'Drag points to fine-tune. Fit the circle to the edge of the dial face.',
-      };
-
-  Widget _markView() {
+  Widget _pickView() {
     final f = _frame!;
     final theme = Theme.of(context);
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Text(_instruction, style: theme.textTheme.titleMedium),
+          child: Text(
+            _message ??
+                (_dials.length == 1
+                    ? 'Found the gauge. If the circle is wrong, tap the right one.'
+                    : 'Is the highlighted circle your gauge? Tap the right one, or '
+                        'tap on the gauge if it is not marked.'),
+            style: theme.textTheme.titleSmall,
+          ),
         ),
         Expanded(
-          child: Center(
-            child: AspectRatio(
-              aspectRatio: f.uprightWidth / f.uprightHeight,
-              child: LayoutBuilder(builder: (context, box) {
-                final k = box.maxWidth / f.uprightWidth;
-                Offset toFrame(Offset p) => p / k;
-                return GestureDetector(
-                  onTapUp: (d) {
-                    if (_step == _Step.adjust) return;
-                    setState(() {
-                      final p = toFrame(d.localPosition);
-                      switch (_step) {
-                        case _Step.center:
-                          _center = p;
-                        case _Step.zero:
-                          _zero = p;
-                        case _Step.max:
-                          _max = p;
-                          _refreshPreview();
-                        case _Step.adjust:
-                      }
-                    });
-                  },
-                  onPanStart: (d) {
-                    final pts = [_center, _zero, _max];
-                    var best = -1;
-                    var bestD = 40.0;
-                    for (var i = 0; i < 3; i++) {
-                      final p = pts[i];
-                      if (p == null) continue;
-                      final dd = (p * k - d.localPosition).distance;
-                      if (dd < bestD) {
-                        bestD = dd;
-                        best = i;
-                      }
-                    }
-                    _dragging = best < 0 ? null : best;
-                  },
-                  onPanUpdate: (d) {
-                    final i = _dragging;
-                    if (i == null) return;
-                    setState(() {
-                      final p = toFrame(d.localPosition);
-                      if (i == 0) _center = p;
-                      if (i == 1) _zero = p;
-                      if (i == 2) _max = p;
-                    });
-                  },
-                  onPanEnd: (_) => setState(() {
-                    _dragging = null;
-                    if (_step == _Step.adjust) _refreshPreview();
-                  }),
-                  child: CustomPaint(
-                    painter: _MarkPainter(
-                      still: _still!,
-                      k: k,
-                      center: _center,
-                      zero: _zero,
-                      max: _max,
-                      radiusScale: _radiusScale,
-                      cal: _preview,
-                      reading: _previewReading,
-                      needleColor: ChartColors.pressure(Brightness.dark),
+          child: InteractiveViewer(
+            maxScale: 8,
+            child: Center(
+              child: AspectRatio(
+                aspectRatio: f.uprightWidth / f.uprightHeight,
+                child: LayoutBuilder(builder: (context, box) {
+                  final k = box.maxWidth / f.uprightWidth;
+                  return GestureDetector(
+                    onTapUp: (d) =>
+                        _tapStill(d.localPosition.dx / k, d.localPosition.dy / k),
+                    child: CustomPaint(
+                      painter: _PickPainter(_still!, k, _dials, _selected,
+                          theme.colorScheme.primary),
+                      child: const SizedBox.expand(),
                     ),
-                    child: const SizedBox.expand(),
-                  ),
-                );
-              }),
+                  );
+                }),
+              ),
             ),
           ),
         ),
-        if (_step == _Step.adjust) _adjustPanel(theme),
-        if (_step != _Step.adjust)
-          TextButton(
-            onPressed: _center == null
-                ? null
-                : () => setState(() {
-                      if (_max != null) {
-                        _max = null;
-                      } else if (_zero != null) {
-                        _zero = null;
-                      } else {
-                        _center = null;
-                      }
-                    }),
-            child: const Text('Undo'),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: FilledButton(
+            onPressed: _dials.isEmpty ? null : _analyse,
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            child: const Text('This is my gauge'),
           ),
+        ),
       ],
     );
   }
 
-  Widget _adjustPanel(ThemeData theme) {
-    final r = _previewReading;
-    final ok = r != null && r.isValid;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(children: [
-            const Text('Circle'),
-            Expanded(
-              child: Slider(
-                min: 0.9,
-                max: 1.5,
-                value: _radiusScale,
-                onChanged: (v) => setState(() => _radiusScale = v),
-                onChangeEnd: (_) => setState(_refreshPreview),
+  Widget _scaleView() {
+    final a = _analysis!;
+    final theme = Theme.of(context);
+    final region = _region!;
+    final v = _markValue;
+    final String instruction;
+    if (_tapSetsZero) {
+      instruction = a.needleFound
+          ? 'Tap the 0 mark.'
+          : 'The needle is hard to see here. Tap the 0 mark.';
+    } else if (_markAngle == null) {
+      instruction = 'The blue line is the needle at rest = 0 bar. '
+          'Now tap the ${_markCtrl.text} mark.';
+    } else {
+      instruction = 'Done. Tap again to correct the mark, or save.';
+    }
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(instruction, style: theme.textTheme.titleSmall),
+        const SizedBox(height: 8),
+        AspectRatio(
+          aspectRatio: 1,
+          child: LayoutBuilder(builder: (context, box) {
+            final s = box.maxWidth;
+            return GestureDetector(
+              onTapUp: (d) => _tapZoom(region.$1 + d.localPosition.dx / s * region.$3,
+                  region.$2 + d.localPosition.dy / s * region.$3),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: CustomPaint(
+                  painter: _ScalePainter(
+                    image: _zoom!,
+                    region: region,
+                    analysis: a,
+                    zeroAngle: _zeroAngle,
+                    markAngle: _markAngle,
+                    markLabel: _markCtrl.text,
+                    needleColor: ChartColors.pressure(Brightness.dark),
+                  ),
+                  child: const SizedBox.expand(),
+                ),
               ),
+            );
+          }),
+        ),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(
+            child: SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: true, label: Text('Tap sets 0')),
+                ButtonSegment(value: false, label: Text('Tap sets mark')),
+              ],
+              selected: {_tapSetsZero},
+              onSelectionChanged: (s) => setState(() => _tapSetsZero = s.first),
             ),
-          ]),
-          Row(children: [
-            Expanded(
-              child: TextField(
-                controller: _minCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Value at 1st mark (bar)'),
-                onChanged: (_) => setState(_refreshPreview),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: _maxCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Value at last mark (bar)'),
-                onChanged: (_) => setState(_refreshPreview),
-              ),
-            ),
-          ]),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Follow the gauge as it moves'),
-            subtitle: const Text('The Flair 58 gauge sits on the piston stem'),
-            value: _track,
-            onChanged: (v) => setState(() {
-              _track = v;
-              _refreshPreview();
-            }),
           ),
-          Row(children: [
-            Icon(ok ? Icons.check_circle : Icons.error_outline,
-                color: ok ? theme.colorScheme.primary : theme.colorScheme.error),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(ok
-                  ? 'Needle found: ${r.value.toStringAsFixed(1)} bar '
-                      '(${_preview!.polarity > 0 ? 'dark' : 'light'} needle, '
-                      'clarity ${r.confidence.toStringAsFixed(0)})'
-                  : 'Needle not found clearly — check the points, '
-                      'lighting and reflections.'),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 90,
+            child: TextField(
+              controller: _markCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Mark (bar)'),
+              onChanged: (_) => setState(() {}),
             ),
-          ]),
-          const SizedBox(height: 8),
-          FilledButton(
-            onPressed: _preview == null ? null : _save,
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-            child: const Text('Save calibration'),
           ),
-        ],
-      ),
+        ]),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Follow the gauge as it moves'),
+          subtitle: const Text('The Flair 58 gauge sits on the piston stem'),
+          value: _track,
+          onChanged: (x) => setState(() => _track = x),
+        ),
+        Text(
+          'The app keeps learning what your dial looks like while you brew, so '
+          'readings get cleaner after the first shots.',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 12),
+        FilledButton(
+          onPressed: _zeroAngle != null && _markAngle != null && v != null ? _save : null,
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }
 
-class _MarkPainter extends CustomPainter {
-  _MarkPainter({
-    required this.still,
-    required this.k,
-    required this.center,
-    required this.zero,
-    required this.max,
-    required this.radiusScale,
-    required this.cal,
-    required this.reading,
-    required this.needleColor,
-  });
+Path _ellipse(DialGeometry g, Offset Function((double, double)) map, [double rho = 1]) {
+  final p = Path();
+  for (var i = 0; i <= 96; i++) {
+    final o = map(g.point(2 * math.pi * i / 96, rho));
+    i == 0 ? p.moveTo(o.dx, o.dy) : p.lineTo(o.dx, o.dy);
+  }
+  return p;
+}
+
+class _PickPainter extends CustomPainter {
+  _PickPainter(this.still, this.k, this.dials, this.selected, this.accent);
 
   final ui.Image still;
   final double k;
-  final Offset? center, zero, max;
-  final double radiusScale;
-  final GaugeCalibration? cal;
-  final GaugeReading? reading;
-  final Color needleColor;
+  final List<DialGeometry> dials;
+  final int selected;
+  final Color accent;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -427,60 +446,113 @@ class _MarkPainter extends CustomPainter {
       Offset.zero & size,
       Paint()..filterQuality = FilterQuality.medium,
     );
-    final line = Paint()
-      ..color = Colors.yellowAccent
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
-    void dot(Offset? p, String label) {
-      if (p == null) return;
-      final o = p * k;
-      canvas.drawCircle(o, 9, Paint()..color = Colors.black54);
-      canvas.drawCircle(o, 9, line);
-      final tp = TextPainter(
-        text: TextSpan(
-            text: label,
-            style: const TextStyle(
-                color: Colors.yellowAccent, fontSize: 12, fontWeight: FontWeight.bold)),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(canvas, o + const Offset(12, -20));
-    }
-
-    final c = center;
-    if (c != null) {
-      for (final p in [zero, max]) {
-        if (p != null) canvas.drawLine(c * k, p * k, line..strokeWidth = 1);
-      }
-      if (zero != null && max != null) {
-        final r = math.max((zero! - c).distance, (max! - c).distance) * radiusScale;
-        canvas.drawCircle(c * k, r * k, line..strokeWidth = 2);
-        // Sweep arc between the marks.
-        final cal = this.cal;
-        if (cal != null) {
-          canvas.drawArc(Rect.fromCircle(center: c * k, radius: r * k * 0.9),
-              cal.zeroAngle, cal.sweep, false,
-              Paint()
-                ..color = Colors.yellowAccent.withValues(alpha: 0.5)
-                ..strokeWidth = 4
-                ..style = PaintingStyle.stroke);
-        }
-      }
-    }
-    final rd = reading;
-    if (c != null && rd != null && rd.isValid) {
-      final d = Offset(math.cos(rd.angle), math.sin(rd.angle));
-      final r = rd.radius * k;
-      canvas.drawLine(c * k + d * r * 0.2, c * k + d * r * 0.95,
+    Offset map((double, double) p) => Offset(p.$1 * k, p.$2 * k);
+    for (var i = dials.length - 1; i >= 0; i--) {
+      final sel = i == selected;
+      final path = _ellipse(dials[i], map, 1.25);
+      canvas.drawPath(
+          path,
           Paint()
-            ..color = needleColor
-            ..strokeWidth = 3
-            ..strokeCap = StrokeCap.round);
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = sel ? 6 : 3
+            ..color = Colors.black54);
+      canvas.drawPath(
+          path,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = sel ? 3 : 1.5
+            ..color = sel ? Colors.yellowAccent : Colors.white70);
     }
-    dot(center, 'centre');
-    dot(zero, 'min');
-    dot(max, 'max');
   }
 
   @override
-  bool shouldRepaint(covariant _MarkPainter old) => true;
+  bool shouldRepaint(covariant _PickPainter old) => true;
+}
+
+class _ScalePainter extends CustomPainter {
+  _ScalePainter({
+    required this.image,
+    required this.region,
+    required this.analysis,
+    required this.zeroAngle,
+    required this.markAngle,
+    required this.markLabel,
+    required this.needleColor,
+  });
+
+  final ui.Image image;
+  final (double, double, double) region;
+  final DialAnalysis analysis;
+  final double? zeroAngle, markAngle;
+  final String markLabel;
+  final Color needleColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width;
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Offset.zero & size,
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+    Offset map((double, double) p) =>
+        Offset((p.$1 - region.$1) / region.$3 * s, (p.$2 - region.$2) / region.$3 * s);
+    final ng = analysis.needleGeometry;
+    final guide = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = Colors.yellowAccent.withValues(alpha: 0.8);
+    canvas.drawPath(_ellipse(analysis.face, map), guide);
+    canvas.drawCircle(map((analysis.pivotX, analysis.pivotY)), 4, Paint()..color = Colors.yellowAccent);
+
+    void label(String t, Offset at) {
+      final tp = TextPainter(
+        text: TextSpan(
+            text: t,
+            style: const TextStyle(
+                color: Colors.black, fontSize: 14, fontWeight: FontWeight.bold)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final r = Rect.fromCenter(center: at, width: tp.width + 10, height: tp.height + 4);
+      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(6)),
+          Paint()..color = Colors.yellowAccent);
+      tp.paint(canvas, r.topLeft + const Offset(5, 2));
+    }
+
+    final z = zeroAngle, m = markAngle;
+    if (z != null && m != null) {
+      var sweep = (m - z) % (2 * math.pi);
+      if (sweep < 0) sweep += 2 * math.pi;
+      final arc = Path();
+      for (var i = 0; i <= 60; i++) {
+        final o = map(ng.point(z + sweep * i / 60, 0.7));
+        i == 0 ? arc.moveTo(o.dx, o.dy) : arc.lineTo(o.dx, o.dy);
+      }
+      canvas.drawPath(
+          arc,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4
+            ..color = Colors.yellowAccent.withValues(alpha: 0.5));
+    }
+    if (z != null) {
+      canvas.drawLine(
+          map(ng.point(z, 0.15)),
+          map(ng.point(z, 0.95)),
+          Paint()
+            ..color = needleColor
+            ..strokeWidth = 4
+            ..strokeCap = StrokeCap.round);
+      label('0', map(ng.point(z, 1.12)));
+    }
+    if (m != null) {
+      canvas.drawLine(map(ng.point(m, 0.8)), map(ng.point(m, 1.0)),
+          guide..strokeWidth = 3);
+      label(markLabel, map(ng.point(m, 1.12)));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScalePainter old) => true;
 }

@@ -42,6 +42,11 @@ class _BrewScreenState extends State<BrewScreen> {
     _source = _demo
         ? SimulatedPressureSource()
         : CameraGaugeSource(app.settings.calibration);
+    final src = _source;
+    if (src is CameraGaugeSource) {
+      // Keep what the reader learns about the empty dial between sessions.
+      src.onLearned = (c) => app.settings.calibration = c;
+    }
     _source.start();
     _session = BrewSession(
         pressure: _source, scale: app.scales, settings: app.settings)
