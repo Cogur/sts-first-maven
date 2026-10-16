@@ -1,0 +1,22 @@
+# HomeGuard device simulator. Start with:  docker compose up
+# Then point the app at this PC's LAN IP (see README.md in this folder).
+services:
+  nvr:
+    image: bluenviron/mediamtx:1.9.3-ffmpeg
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      - "8554:8554"
+    restart: unless-stopped
+
+  intercom:
+    image: python:3.12-alpine
+    working_dir: /sim
+    command: ["python", "-u", "fake_devices.py", "--new-event-every", "120"]
+    volumes:
+      - ./fake_devices.py:/sim/fake_devices.py:ro
+      - ./sdcard:/sim/sdcard
+    ports:
+      - "8080:8080"   # door station relay
+      - "8081:8081"   # indoor monitor SD card
+    restart: unless-stopped

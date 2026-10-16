@@ -1,0 +1,63 @@
+name: HomeGuard test APK
+
+# Builds an installable "HomeGuard Test" APK on every push that touches the
+# app. Download it from the run's Artifacts section and install it on any
+# Android phone (Android 9+). It installs next to the Play version
+# (app id ...homeguard.test) and is signed with a throwaway debug key, so it
+# is for testing only.
+
+on:
+  push:
+    paths:
+      - 'homeguard/**'
+      - '.github/workflows/homeguard-test-apk.yml'
+  pull_request:
+    paths:
+      - 'homeguard/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homeguard-test-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: homeguard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+      - name: Build test APK
+        env:
+          HOMEGUARD_TEST_BUILD: 'true'
+        run: |
+          flutter build apk --release --build-number=$((1000 + GITHUB_RUN_NUMBER))
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             "build/app/outputs/flutter-apk/homeguard-test-${GITHUB_RUN_NUMBER}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homeguard-test-apk-${{ github.run_number }}
+          path: homeguard/build/app/outputs/flutter-apk/homeguard-test-*.apk
+          retention-days: 14

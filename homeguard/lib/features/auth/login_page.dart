@@ -18,6 +18,7 @@ class _LoginPageState extends State<LoginPage> {
   final _user = TextEditingController();
   final _pass = TextEditingController();
   final _remote = TextEditingController();
+  final _template = TextEditingController();
   bool _remember = true;
   bool _biometric = false;
   bool _obscure = true;
@@ -47,6 +48,7 @@ class _LoginPageState extends State<LoginPage> {
     _user.dispose();
     _pass.dispose();
     _remote.dispose();
+    _template.dispose();
     super.dispose();
   }
 
@@ -72,6 +74,7 @@ class _LoginPageState extends State<LoginPage> {
         enableBiometrics: _biometric,
         remoteHost: _showRemote ? _remote.text : '',
         remoteMode: _remoteMode,
+        cameraPathTemplate: _template.text,
       );
     } on LoginException catch (e) {
       if (mounted) setState(() => _error = e.message);
@@ -136,7 +139,7 @@ class _LoginPageState extends State<LoginPage> {
                         textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
                           labelText: 'NVR local IP / hostname',
-                          hintText: '192.168.1.100',
+                          hintText: '192.168.1.100 or 192.168.1.100:554',
                           prefixIcon: Icon(Icons.lan_outlined),
                         ),
                         validator: (v) =>
@@ -173,6 +176,8 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         validator: (v) => (v ?? '').isEmpty ? 'Required' : null,
                       ),
+                      const SizedBox(height: 8),
+                      _AdvancedSection(controller: _template),
                       const SizedBox(height: 8),
                       _RemoteSection(
                         expanded: _showRemote,
@@ -214,6 +219,42 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdvancedSection extends StatelessWidget {
+  const _AdvancedSection({required this.controller});
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          leading: const Icon(Icons.tune),
+          title: const Text('Advanced'),
+          subtitle: const Text('Camera stream path for non-standard firmware or the simulator'),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          children: [
+            TextFormField(
+              controller: controller,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Camera RTSP path template',
+                hintText: DeviceConfig.tvtRtspTemplate,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Leave empty for Techson/TVT recorders. Placeholders: {channel}, {stream} (main/sub). '
+              'A custom RTSP port can be typed after the IP, e.g. 192.168.1.50:8554.',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            ),
+          ],
         ),
       ),
     );

@@ -72,6 +72,31 @@ void main() {
     expect(AuthController.normalizeHost('fd00::1'), 'fd00::1');
   });
 
+  test('port parsing', () {
+    expect(AuthController.parsePort('192.168.1.10:8554'), 8554);
+    expect(AuthController.parsePort('rtsp://u:p@nvr.local:554/x'), 554);
+    expect(AuthController.parsePort('[fd00::1]:8554'), 8554);
+    expect(AuthController.parsePort('192.168.1.10'), isNull);
+    expect(AuthController.parsePort('fd00::1'), isNull);
+    expect(AuthController.parsePort('host:99999'), isNull);
+  });
+
+  test('custom port and camera path from the login screen are applied before verifying', () async {
+    up = {'192.168.1.10:8554'};
+    final auth = build();
+    await auth.init();
+    await auth.signIn(
+      host: '192.168.1.10:8554',
+      username: 'admin',
+      password: 'pw',
+      remember: false,
+      enableBiometrics: false,
+      cameraPathTemplate: '/cam{channel}_{stream}',
+    );
+    expect(verified.single.toString(), 'rtsp://192.168.1.10:8554/cam1_sub');
+    expect(registry.byId('cam2')!.rtspPath(StreamQuality.main), '/cam2_main');
+  });
+
   test('successful sign-in verifies against camera 1 sub-stream and stores credentials', () async {
     final auth = build();
     await auth.init();

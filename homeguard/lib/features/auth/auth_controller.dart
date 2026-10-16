@@ -92,6 +92,16 @@ class AuthController extends ChangeNotifier {
     return h;
   }
 
+  /// Port typed after the host ("192.168.1.10:8554"), if any.
+  static int? parsePort(String input) {
+    var h = input.trim().replaceFirst(RegExp(r'^[a-z][a-z0-9+.-]*://', caseSensitive: false), '');
+    h = h.split('/').first;
+    if (h.contains('@')) h = h.split('@').last;
+    final m = RegExp(r'^(?:\[[^\]]+\]|[^:]+):(\d{1,5})$').firstMatch(h);
+    final port = int.tryParse(m?.group(1) ?? '');
+    return port != null && port > 0 && port <= 65535 ? port : null;
+  }
+
   Future<void> signIn({
     required String host,
     required String username,
@@ -100,6 +110,7 @@ class AuthController extends ChangeNotifier {
     required bool enableBiometrics,
     String remoteHost = '',
     RemoteMode remoteMode = RemoteMode.disabled,
+    String cameraPathTemplate = '',
   }) async {
     final wait = lockoutRemaining;
     if (wait != null) {
@@ -122,8 +133,17 @@ class AuthController extends ChangeNotifier {
         lanHost: lanHost,
         remoteHost: remote,
         remoteMode: remote.isEmpty ? RemoteMode.disabled : remoteMode,
+        rtspPort: parsePort(host),
       ),
     );
+    final template = cameraPathTemplate.trim();
+    if (template.isNotEmpty) {
+      for (final cam in _registry.devices.where((d) => d.parentId == nvr.id).toList()) {
+        if (cam.rtspPathTemplate != template) {
+          await _registry.upsert(cam.copyWith(rtspPathTemplate: template));
+        }
+      }
+    }
 
     final route = await _connections.resolve(nvr.id, force: true);
     if (!route.reachable) {

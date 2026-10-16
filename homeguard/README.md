@@ -116,6 +116,11 @@ flutter build apk --release
 flutter build ipa      # needs Xcode + signing
 ```
 
+### Testing on a phone (no Play Store, no real devices needed)
+
+1. **Get the APK.** Every push that changes `homeguard/` runs the *HomeGuard test APK* GitHub Action. Open the run → **Artifacts** → download `homeguard-test-apk-N`, unzip it, copy the `.apk` to your phone and open it. You'll need to allow "Install unknown apps" for your browser or file manager. It installs as **HomeGuard Test**, separate from a future Play version.
+2. **Simulate the devices.** [`tools/simulator/`](tools/simulator/README.md) runs a fake NVR (3 cameras), door station, relay and indoor monitor on your PC with `docker compose up`. It also has a step-by-step test checklist.
+
 Publishing to Google Play: see [`docs/PLAY_STORE.md`](docs/PLAY_STORE.md). It covers the signing key, the first manual upload, the privacy policy and data-safety answers, and the GitHub Actions workflow that builds and uploads signed bundles.
 
 Platform notes:

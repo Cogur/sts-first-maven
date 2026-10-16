@@ -18,6 +18,11 @@ fun signingValue(prop: String, env: String): String? =
 
 val releaseStoreFile = signingValue("storeFile", "ANDROID_KEYSTORE_PATH")
 
+// Explicit opt-in for sideloadable tester builds (HOMEGUARD_TEST_BUILD=true):
+// separate app id "<id>.test" and debug-key signing. These APKs can never
+// be uploaded over the Play app, because the id and signature differ.
+val isTestBuild = System.getenv("HOMEGUARD_TEST_BUILD") == "true"
+
 android {
     namespace = "com.homeguard.local.homeguard"
     compileSdk = flutter.compileSdkVersion
@@ -43,6 +48,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appLabel"] = "HomeGuard"
     }
 
     signingConfigs {
@@ -58,12 +64,17 @@ android {
 
     buildTypes {
         release {
-            // Never fall back to the debug key: Play rejects debug-signed bundles,
-            // and a silently debug-signed release is a supply-chain risk.
-            signingConfig = if (releaseStoreFile != null) {
-                signingConfigs.getByName("release")
-            } else {
-                null
+            // Never fall back to the debug key silently: Play rejects debug-signed
+            // bundles, and a quietly debug-signed release is a supply-chain risk.
+            signingConfig = when {
+                isTestBuild -> signingConfigs.getByName("debug")
+                releaseStoreFile != null -> signingConfigs.getByName("release")
+                else -> null
+            }
+            if (isTestBuild) {
+                applicationIdSuffix = ".test"
+                versionNameSuffix = "-test"
+                manifestPlaceholders["appLabel"] = "HomeGuard Test"
             }
         }
     }
