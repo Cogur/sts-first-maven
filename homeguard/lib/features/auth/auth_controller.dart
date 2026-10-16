@@ -18,7 +18,9 @@ enum AuthStatus { initializing, signedOut, locked, authenticated }
 typedef CredentialVerifier = Future<void> Function(Uri rtspUri, Credentials c);
 
 Future<void> rtspCredentialVerifier(Uri uri, Credentials c) async {
-  await RtspClient.probe(uri: uri, username: c.username, password: c.password);
+  // Plain DESCRIBE only: some recorders reject the ONVIF back-channel
+  // "Require" header, which must not be mistaken for a bad login.
+  await RtspClient.probe(uri: uri, username: c.username, password: c.password, backchannel: false);
 }
 
 class LoginException implements Exception {
@@ -168,11 +170,20 @@ class AuthController extends ChangeNotifier {
     try {
       await _verify(route.rtspUri(firstCamera.rtspPath(StreamQuality.sub)), creds);
     } on RtspException catch (e) {
-      if (e.isAuthFailure) {
+      final detail = e.detail == null ? '' : '\n\nNVR replied: ${e.detail}';
+      if (e.statusCode == 401) {
         _registerFailure();
-        throw LoginException('Invalid username or password');
+        throw LoginException(
+          'Invalid username or password. Check upper/lower case — the video service is case-sensitive.$detail',
+        );
       }
-      throw LoginException('NVR did not respond correctly: ${e.message}');
+      if (e.statusCode == 403) {
+        throw LoginException(
+          'The NVR accepted the connection but refused this user. On the NVR, check that the user has '
+          'live-view / remote preview permission (Account and Authority → Edit User).$detail',
+        );
+      }
+      throw LoginException('NVR did not respond correctly: ${e.message}$detail');
     }
 
     _failures = 0;

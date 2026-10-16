@@ -9,9 +9,13 @@ import 'rtsp_message.dart';
 import 'sdp.dart';
 
 class RtspException implements Exception {
-  RtspException(this.message, {this.statusCode});
+  RtspException(this.message, {this.statusCode, this.detail});
   final String message;
   final int? statusCode;
+
+  /// What the device actually answered (status line, auth schemes, server),
+  /// shown to the user so login problems can be diagnosed without tools.
+  final String? detail;
 
   bool get isAuthFailure => statusCode == 401 || statusCode == 403;
 
@@ -116,20 +120,59 @@ class RtspClient {
     final target = url ?? uri.toString();
     var response = await _send(method, target, headers);
     if (response.statusCode == 401) {
-      final challenge = AuthChallenge.pickBest(response.headerAll('www-authenticate'));
+      final offered = response.headerAll('www-authenticate');
+      final challenge = AuthChallenge.pickBest(offered);
       if (challenge == null) {
-        throw RtspException('Device requires unsupported authentication', statusCode: 401);
+        throw RtspException(
+          'Device requires unsupported authentication',
+          statusCode: 401,
+          detail: _describe(response),
+        );
       }
       _challenge = challenge;
       response = await _send(method, target, headers);
+      // Some recorder firmwares mis-handle Digest but also offer Basic.
+      // Routes are only ever LAN, VPN or TLS (see ConnectionManager), so a
+      // single Basic retry does not expose credentials to the internet.
+      if (response.statusCode == 401 && challenge.isDigest) {
+        final basic = AuthChallenge.pickBest(
+          offered.where((h) => h.trimLeft().toLowerCase().startsWith('basic')),
+        );
+        if (basic != null) {
+          _challenge = basic;
+          response = await _send(method, target, headers);
+        }
+      }
     }
     if (!response.ok) {
       throw RtspException(
-        response.statusCode == 401 ? 'Invalid username or password' : '$method failed: ${response.reason}',
+        switch (response.statusCode) {
+          401 => 'Invalid username or password',
+          403 => 'Access forbidden for this user or stream',
+          _ => '$method failed: ${response.statusCode} ${response.reason}',
+        },
         statusCode: response.statusCode,
+        detail: _describe(response),
       );
     }
     return response;
+  }
+
+  static String _describe(RtspResponse r) {
+    final auth = r
+        .headerAll('www-authenticate')
+        .map((h) {
+          final c = AuthChallenge.parse(h);
+          if (c == null) return h;
+          final alg = c.params['algorithm'];
+          return '${c.scheme}${alg == null ? '' : ' $alg'}${c.realm.isEmpty ? '' : ' realm "${c.realm}"'}';
+        })
+        .join(', ');
+    return [
+      'RTSP ${r.statusCode} ${r.reason}'.trim(),
+      if (auth.isNotEmpty) 'auth: $auth',
+      if (r.header('server') != null) 'server: ${r.header('server')}',
+    ].join(' · ');
   }
 
   Future<RtspResponse> _send(String method, String url, Map<String, String> headers) {
@@ -175,6 +218,7 @@ class RtspClient {
     required String username,
     required String password,
     Duration timeout = const Duration(seconds: 4),
+    bool backchannel = true,
   }) async {
     final client = RtspClient(
       uri: uri,
@@ -187,7 +231,7 @@ class RtspClient {
     try {
       await client.connect();
       final options = await client.request('OPTIONS');
-      final (sdp, _) = await client.describe(backchannel: true);
+      final (sdp, _) = await client.describe(backchannel: backchannel);
       return RtspProbeResult(latency: sw.elapsed, sdp: sdp, server: options.header('server'));
     } finally {
       await client.close();

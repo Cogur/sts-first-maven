@@ -166,7 +166,13 @@ void main() {
           remember: false,
           enableBiometrics: false,
         ),
-        throwsA(isA<LoginException>().having((e) => e.message, 'message', 'Invalid username or password')),
+        throwsA(
+          isA<LoginException>().having(
+            (e) => e.message,
+            'message',
+            startsWith('Invalid username or password'),
+          ),
+        ),
       );
     }
     expect(auth.lockoutRemaining, isNotNull);
@@ -181,6 +187,31 @@ void main() {
       throwsA(isA<LoginException>().having((e) => e.message, 'message', startsWith('Too many attempts'))),
     );
     expect(await store.readCredentials('nvr'), isNull);
+  });
+
+  test('403 is reported as a permission problem and does not count toward lockout', () async {
+    final auth = AuthController(
+      store: store,
+      biometrics: bio,
+      registry: registry,
+      connections: cm,
+      verifier: (uri, c) async =>
+          throw RtspException('forbidden', statusCode: 403, detail: 'RTSP 403 Forbidden'),
+    );
+    await auth.init();
+    for (var i = 0; i < 6; i++) {
+      await expectLater(
+        auth.signIn(
+          host: '192.168.1.10',
+          username: 'a',
+          password: 'pw',
+          remember: false,
+          enableBiometrics: false,
+        ),
+        throwsA(isA<LoginException>().having((e) => e.message, 'message', contains('live-view'))),
+      );
+    }
+    expect(auth.lockoutRemaining, isNull);
   });
 
   test('unreachable NVR gives an actionable error', () async {

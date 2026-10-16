@@ -68,7 +68,9 @@ void main() {
   test('login verifies digest credentials against the simulated NVR', () async {
     await expectLater(
       signIn('wrong'),
-      throwsA(isA<LoginException>().having((e) => e.message, 'message', 'Invalid username or password')),
+      throwsA(
+        isA<LoginException>().having((e) => e.message, 'message', startsWith('Invalid username or password')),
+      ),
     );
     await signIn('admin123');
     expect(auth.status, AuthStatus.authenticated);

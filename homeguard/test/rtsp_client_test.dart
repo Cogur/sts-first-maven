@@ -10,9 +10,12 @@ import 'package:homeguard/core/rtsp/rtsp_message.dart';
 /// Minimal RTSP server emulating a TVT-style NVR with digest auth and an
 /// ONVIF back-channel track.
 class FakeNvr {
-  FakeNvr({this.user = 'admin', this.pass = 's3cret!'});
+  FakeNvr({this.user = 'admin', this.pass = 's3cret!', this.digestBroken = false});
   final String user;
   final String pass;
+
+  /// Emulates firmware whose Digest check never matches but Basic works.
+  final bool digestBroken;
   late ServerSocket _server;
   final rtp = <InterleavedPacket>[];
   final methods = <String>[];
@@ -67,10 +70,13 @@ class FakeNvr {
     final auth = headers['authorization'];
     String h(String x) => md5.convert(utf8.encode(x)).toString();
     final expected = h('${h('$user:$realm:$pass')}:$nonce:${h('$method:$uri')}');
-    if (auth == null || !auth.contains('response="$expected"')) {
+    final basicOk = auth == 'Basic ${base64.encode(utf8.encode('$user:$pass'))}';
+    final digestOk = !digestBroken && auth != null && auth.contains('response="$expected"');
+    if (!basicOk && !digestOk) {
       s.write(
-        'RTSP/1.0 401 Unauthorized\r\nCSeq: $cseq\r\n'
-        'WWW-Authenticate: Digest realm="$realm", nonce="$nonce"\r\n\r\n',
+        'RTSP/1.0 401 Unauthorized\r\nCSeq: $cseq\r\nServer: FakeNVR\r\n'
+        'WWW-Authenticate: Digest realm="$realm", nonce="$nonce"\r\n'
+        '${digestBroken ? 'WWW-Authenticate: Basic realm="$realm"\r\n' : ''}\r\n',
       );
       return;
     }
@@ -115,6 +121,27 @@ void main() {
       RtspClient.probe(uri: uri(), username: 'admin', password: 'nope'),
       throwsA(isA<RtspException>().having((e) => e.isAuthFailure, 'isAuthFailure', isTrue)),
     );
+  });
+
+  test('auth failure carries what the NVR replied', () async {
+    await expectLater(
+      RtspClient.probe(uri: uri(), username: 'admin', password: 'nope', backchannel: false),
+      throwsA(
+        isA<RtspException>().having(
+          (e) => e.detail,
+          'detail',
+          allOf(contains('RTSP 401'), contains('Digest realm "NVR"'), contains('FakeNVR')),
+        ),
+      ),
+    );
+  });
+
+  test('falls back to Basic when the firmware rejects Digest but offers Basic', () async {
+    await nvr.stop();
+    nvr = FakeNvr(digestBroken: true);
+    await nvr.start();
+    final r = await RtspClient.probe(uri: uri(), username: 'admin', password: 's3cret!', backchannel: false);
+    expect(r.videoCodec, 'H264');
   });
 
   test('closed port surfaces as unreachable, not a hang', () async {
