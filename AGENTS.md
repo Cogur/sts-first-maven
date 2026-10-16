@@ -6,7 +6,18 @@ This file is the always-on router for every AI agent (Claude Code, Cursor, Copil
 |---|---|---|
 | HomeGuard: local-first Flutter security app (Techson NVR, door station, indoor monitor) | `homeguard/` | [`homeguard/AGENTS.md`](homeguard/AGENTS.md) |
 
-Rules that apply to the whole repo:
+## Shared how-tos (every app, existing and new)
+
+These apply to all apps, including ones created later. Follow them without being asked. The user should never have to repeat them.
+
+| Task mentions… / when | Read |
+|---|---|
+| APK, Android build, install on phone, test build, CI, GitHub Actions, release page; **creating any new Flutter app** | [`docs/build-apk.md`](docs/build-apk.md) |
+
+## Rules that apply to the whole repo
+
 - When a task touches an app, read that app's `AGENTS.md` first and follow its routing table.
 - If a code change makes a doc wrong, fix the doc in the same change. A doc that lies is worse than no doc.
 - Team knowledge goes in `<app>/docs/`. Personal agent preferences do not belong in this repo.
+- **Reusable processes go in root `docs/`, not in an app.** If what you work out would help another project (build, CI, signing, release, sandbox workarounds), write it generically in `docs/<topic>.md` and add a row to *Shared how-tos*. App docs link to it and keep only what is specific to the app. Never copy a shared doc into an app.
+- **New app checklist:** add a row to the app table above, give the app its own `AGENTS.md`, and apply every *Shared how-to* that fits (for a Flutter app, its test-APK workflow from the first push).

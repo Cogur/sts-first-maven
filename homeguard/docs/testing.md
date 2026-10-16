@@ -4,7 +4,7 @@ Tests run without devices: network, storage, biometrics and credential checks ar
 
 **Use this document when:** you add or change tests, need a fake, run the simulator checks, or touch CI.
 
-**Not covered:** how to start and use the simulator by hand → [../tools/simulator/README.md](../tools/simulator/README.md). Signing and Play releases → [PLAY_STORE.md](PLAY_STORE.md).
+**Not covered:** how to start and use the simulator by hand → [../tools/simulator/README.md](../tools/simulator/README.md). Signing and Play releases → [PLAY_STORE.md](PLAY_STORE.md). How test APKs are built and published for any app in this repo (template, signing-key cache, reading build errors from the sandbox) → [../../docs/build-apk.md](../../docs/build-apk.md).
 
 ## Definitions
 
