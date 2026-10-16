@@ -54,6 +54,10 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
 | `lib/brew/brew_session.dart` | 10 Hz recording, auto start/stop, flow from weight |
 | `lib/ui/` | Screens; `widgets/brew_chart.dart` is the shot graph |
 
+Bluetooth uses [flutter_blue_plus](https://pub.dev/packages/flutter_blue_plus),
+which is free for personal and nonprofit use. Selling or publishing the app
+commercially would need a commercial license.
+
 To support another scale, implement `Scale` (`lib/scale/scale.dart`) and
 return it from `ScaleManager`.
 

@@ -80,3 +80,17 @@ flutter run --release
 
 iOS needs a Mac with Xcode: `flutter build ios` / open
 `ios/Runner.xcworkspace`, set your signing team, then run on the device.
+
+## When the build fails
+
+- `flutter analyze` / `flutter test` failures show in the run like any step.
+- If `flutter build apk` fails, the step **Report build error** copies the
+  Gradle error into a run annotation and the job summary. From the Claude
+  sandbox the raw log download is blocked, but annotations are readable:
+
+  ```bash
+  gh run view <run-id> --repo Cogur/sts-first-maven       # shows ANNOTATIONS
+  ```
+- Known pitfall: old plugin versions with outdated Gradle files. Keep
+  `flutter_blue_plus` on 2.x. It needs `wakelock_plus` 1.8.0, because 1.8.1
+  pulls a newer `dbus` that conflicts with it.

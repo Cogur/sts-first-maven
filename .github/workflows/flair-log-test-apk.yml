@@ -57,9 +57,22 @@ jobs:
 
       - name: Build APK
         run: |
-          flutter build apk --release --build-number=$((1000 + GITHUB_RUN_NUMBER))
+          set -o pipefail
+          flutter build apk --release --build-number=$((1000 + GITHUB_RUN_NUMBER)) \
+            2>&1 | tee "$RUNNER_TEMP/build.log"
           mv build/app/outputs/flutter-apk/app-release.apk \
              "build/app/outputs/flutter-apk/flair-log-${GITHUB_RUN_NUMBER}.apk"
+
+      # Surface the Gradle error as a run annotation (readable with
+      # `gh run view` even where raw logs can't be downloaded).
+      - name: Report build error
+        if: failure()
+        run: |
+          [ -f "$RUNNER_TEMP/build.log" ] || exit 0
+          msg=$(grep -E -A12 "What went wrong|error:|Error:|FAILURE" "$RUNNER_TEMP/build.log" \
+                | head -60 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=flutter build apk failed::${msg}"
+          { echo '```'; tail -80 "$RUNNER_TEMP/build.log"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -35,7 +35,12 @@ class BookooScale implements Scale {
   Future<void> connect() async {
     _state.add(ScaleConnectionState.connecting);
     try {
-      await device.connect(timeout: const Duration(seconds: 15), mtu: null);
+      // Personal use falls under the FlutterBluePlus nonprofit license; a
+      // commercial release would need a commercial license.
+      await device.connect(
+          license: License.nonprofit,
+          timeout: const Duration(seconds: 15),
+          mtu: null);
       _connSub ??= device.connectionState.listen((s) {
         if (s == BluetoothConnectionState.disconnected) {
           _state.add(ScaleConnectionState.disconnected);
