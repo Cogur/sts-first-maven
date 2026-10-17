@@ -319,7 +319,7 @@ class DialLocator {
       var bestIn = <(double, double)>[];
       for (var it = 0; it < 300; it++) {
         final s3 = [for (var q = 0; q < 3; q++) pts[rnd.nextInt(pts.length)]];
-        final c = _fitCircle(s3);
+        final c = fitCircle(s3);
         if (c == null || c.$3 < 0.5 * rf || c.$3 > 1.5 * rf) continue;
         final inl = [
           for (final p in pts)
@@ -330,7 +330,7 @@ class DialLocator {
         if (inl.length > bestIn.length) bestIn = inl;
       }
       if (bestIn.length >= 12) {
-        final c = _fitCircle(bestIn);
+        final c = fitCircle(bestIn);
         if (c != null) geo = DialGeometry.circle(c.$1, c.$2, c.$3);
       }
       // Consensus ellipse (a phone looking at the gauge from an angle).
@@ -509,8 +509,8 @@ class DialLocator {
     return out;
   }
 
-  /// Algebraic (Kåsa) circle fit.
-  static (double, double, double)? _fitCircle(List<(double, double)> p) {
+  /// Algebraic (Kåsa) circle fit: (centre x, centre y, radius).
+  static (double, double, double)? fitCircle(List<(double, double)> p) {
     final n = p.length;
     var mx = 0.0, my = 0.0;
     for (final q in p) {

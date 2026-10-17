@@ -290,7 +290,7 @@ void main() {
           markAngle: a.restAngle! + sweep10, markValue: 10);
       final f = rotatedFrame(f2, 12);
       final moved = GaugeSetup.relocate(f, cal)!;
-      expect((moved.zeroAngle - cal.zeroAngle) / deg, closeTo(12, 7));
+      expect((moved.zeroAngle + moved.tilt - cal.zeroAngle - cal.tilt) / deg, closeTo(12, 7));
       expect(GaugeReader(moved).read(f)!.value, closeTo(0, 0.3));
     });
 

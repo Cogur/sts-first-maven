@@ -487,6 +487,26 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           value: _track,
           onChanged: (x) => setState(() => _track = x),
         ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(children: [
+            Icon(a.marker != null ? Icons.check_circle : Icons.info_outline,
+                size: 18,
+                color: a.marker != null
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                a.marker != null
+                    ? 'Marker found: the gauge is followed by it.'
+                    : 'No marker in the picture. A printed marker next to the gauge '
+                        'keeps it found (Settings > Print a marker).',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+          ]),
+        ),
         Text(
           'The app keeps learning what your dial looks like while you brew, so '
           'readings get cleaner after the first shots.',

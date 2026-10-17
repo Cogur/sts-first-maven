@@ -5,6 +5,7 @@ import 'dial_geometry.dart';
 import 'dial_locator.dart';
 import 'gauge_calibration.dart';
 import 'luma_frame.dart';
+import 'marker.dart';
 
 /// Result of analysing one frame.
 class GaugeReading {
@@ -46,8 +47,8 @@ class Relocation {
   /// Dial face in the new view.
   final DialGeometry face;
 
-  /// How much the dial appears turned compared with calibration (radians,
-  /// clockwise): the phone is held a little differently.
+  /// How much the dial appears turned on screen compared with calibration
+  /// (radians, clockwise): the phone is held a little differently.
   final double rotation;
 
   /// Appearance correlation (1 = identical).
@@ -101,6 +102,15 @@ class GaugeReader {
 
   DialGeometry? _face;
   DialGeometry? _prevFace;
+
+  // Marker tracking: the marker's pose now, and the face as it was relative
+  // to the marker when last confirmed (constant if the marker is on the
+  // gauge; follows the piston if it is on the machine).
+  MarkerPose? _marker;
+  (DialGeometry, MarkerPose)? _relToMarker;
+
+  /// The marker in the last frame (null if none / not seen).
+  MarkerPose? get marker => _marker;
   double _lastMatch = 1;
   bool _wide = true;
   int _lostFrames = 0;
@@ -126,6 +136,7 @@ class GaugeReader {
   void resetTracking() {
     _face = null;
     _prevFace = null;
+    _relToMarker = null;
     _wide = true;
     _lostFrames = 0;
     _lastAngle = null;
@@ -143,12 +154,30 @@ class GaugeReader {
     var face = _face ?? calibration.face(f.uprightWidth, f.uprightHeight);
     if (face.radius < 6) return null;
     var tracked = true;
+
+    // Printed marker: find it near its last pose, and predict the gauge from
+    // it. This also covers frames where the dial itself cannot be matched
+    // (lever in front of it, blur).
+    DialGeometry? fromMarker;
+    final m0 = calibration.markerIn(f.uprightWidth, f.uprightHeight);
+    if (m0 != null) {
+      final seen = MarkerDetector.detectNear(f, _marker ?? m0) ??
+          (_marker == null ? null : MarkerDetector.detectNear(f, m0));
+      _marker = seen;
+      if (seen != null) {
+        final rel = _relToMarker ??
+            (calibration.face(f.uprightWidth, f.uprightHeight), m0);
+        fromMarker = faceFromMarker(rel.$1, rel.$2, seen);
+        face = fromMarker;
+      }
+    }
+
     if (calibration.trackMovement) {
       // The gauge moves steadily with the piston: start the search where it
       // will be if it keeps its speed (limited to a third of a radius).
       final prev = _prevFace;
-      var start = face;
-      if (prev != null && _face != null && !_wide) {
+      var start = fromMarker ?? face;
+      if (fromMarker == null && prev != null && _face != null && !_wide) {
         var vx = face.cx - prev.cx, vy = face.cy - prev.cy;
         final v = math.sqrt(vx * vx + vy * vy), vmax = 0.33 * face.radius;
         if (v > vmax) {
@@ -157,7 +186,9 @@ class GaugeReader {
         }
         start = face.moved(face.cx + vx, face.cy + vy);
       }
-      final t = track(f, start, range: _wide ? 0.8 : (_lastMatch < 0.8 ? 0.5 : 0.3));
+      final confirmed = fromMarker != null && _relToMarker != null;
+      final t = track(f, start,
+          range: confirmed ? 0.3 : (_wide ? 0.8 : (_lastMatch < 0.8 ? 0.5 : 0.3)));
       final need = _template != null
           ? minMatch
           : (calibration.faceScore > 0 ? 0.45 * calibration.faceScore : 15);
@@ -173,6 +204,15 @@ class GaugeReader {
         _wide = false;
         _lostFrames = 0;
         _lastMatch = t.score;
+        final mk = _marker;
+        if (mk != null) _relToMarker = (face, mk);
+      } else if (confirmed) {
+        // The dial could not be matched (lever in front, blur), but the
+        // marker says where it is (relation confirmed in this session).
+        face = fromMarker;
+        _prevFace = _face;
+        _face = face;
+        _lostFrames = 0;
       } else {
         _wide = true;
         _lostFrames++;
@@ -395,15 +435,20 @@ class GaugeReader {
   /// given size: position and size from the new view, and zero mark, pivot,
   /// learned background and appearance template turned by the rotation.
   static GaugeCalibration relocated(GaugeCalibration c, Relocation r, int w, int h,
-      {double? pivotX, double? pivotY, Uint8List? template}) {
+      {double? pivotX, double? pivotY, Uint8List? template, MarkerPose? marker}) {
     final rot = r.rotation;
     final cs = math.cos(rot), sn = math.sin(rot);
+    // Dial angles (needle, zero, template and background columns) count from
+    // the face's tilt axis. The part of the turn the new face's tilt already
+    // carries must not be applied again.
+    var dialRot = (rot - (r.face.tilt - c.tilt)) % (2 * math.pi);
+    if (dialRot > math.pi) dialRot -= 2 * math.pi;
     // Template: a fresh one from the new view if given, else the old one
     // with its direction columns shifted by the rotation (4° steps).
     Uint8List? tmpl = template;
     final old = c.template;
     if (tmpl == null && old != null && old.length == _tRho.length * _tN) {
-      var shift = (rot / (2 * math.pi) * _tN).round() % _tN;
+      var shift = (dialRot / (2 * math.pi) * _tN).round() % _tN;
       if (shift < 0) shift += _tN;
       tmpl = Uint8List(old.length);
       for (var k = 0; k < _tRho.length; k++) {
@@ -416,7 +461,7 @@ class GaugeReader {
     GaugeBackground? bg;
     final ob = c.background;
     if (ob != null) {
-      var shift = (rot / (2 * math.pi) * nA).round() % nA;
+      var shift = (dialRot / (2 * math.pi) * nA).round() % nA;
       if (shift < 0) shift += nA;
       bg = GaugeBackground.empty();
       for (var a = 0; a < nA; a++) {
@@ -436,7 +481,7 @@ class GaugeReader {
       tilt: face.tilt,
       pivotDx: pivotX != null ? (pivotX - face.cx) / face.radius : c.pivotDx * cs - c.pivotDy * sn,
       pivotDy: pivotY != null ? (pivotY - face.cy) / face.radius : c.pivotDx * sn + c.pivotDy * cs,
-      zeroAngle: c.zeroAngle + rot,
+      zeroAngle: c.zeroAngle + dialRot,
       sweep: c.sweep,
       minValue: c.minValue,
       maxValue: c.maxValue,
@@ -446,6 +491,26 @@ class GaugeReader {
       faceScore: c.faceScore,
       background: bg,
       template: tmpl,
+      marker: marker != null
+          ? MarkerPose(marker.cx / w, marker.cy / h, marker.r / w, marker.angle, marker.score)
+          : c.marker,
+    );
+  }
+
+  /// The gauge face where the marker now says it is: the calibrated
+  /// face-to-marker relation (position, size, rotation) applied to [now].
+  static DialGeometry faceFromMarker(
+      DialGeometry face0, MarkerPose m0, MarkerPose now) {
+    final s = now.r / m0.r, rot = now.angle - m0.angle;
+    final dx = face0.cx - m0.cx, dy = face0.cy - m0.cy;
+    final c = math.cos(rot), sn = math.sin(rot);
+    return DialGeometry(
+      cx: now.cx + s * (dx * c - dy * sn),
+      cy: now.cy + s * (dx * sn + dy * c),
+      rx: face0.rx * s,
+      ry: face0.ry * s,
+      tilt: face0.tilt + rot,
+      score: face0.score,
     );
   }
 

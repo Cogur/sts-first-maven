@@ -12,7 +12,8 @@ see wrong / missing pressure readings.
 | Find the pivot | `dial_locator.dart` `hubCandidates`, `gauge_reader.dart` `choosePivot` | Small round shapes near the centre (Hough), keeping the strongest one that lies on the needle line (`needleLine`, a Radon-style search). |
 | Zero and scale | `calibration_screen.dart`, `gauge_setup.dart` | Lever up: the needle position is 0 bar. The user taps one numbered mark (10 on the Flair gauge) and types its number. |
 | Read each frame | `gauge_reader.dart` `read` | Polar samples around the pivot (360 directions × 20 rings, 0.28–0.82 of the face radius). Needle = direction that differs from the empty dial in the inner half **and** the outer half of the rings. |
-| Find it again | `gauge_setup.dart` `relocate` | The phone is not in the same place every session. At session start (lever up) the same steps as calibration run on the new view: dial with the clearest needle, pivot on the needle line, needle at rest = zero. The difference to the stored zero is the phone's turn (accepted up to ±25°); background and template are turned with it, the template is recorded afresh; degrees-per-bar are kept. When the gauge is lost mid-shot only the position is updated (`keepZero`). Runs in the background (`relocateInBackground`). |
+| Printed marker (optional) | `marker.dart` | A ring target the user prints (`assets/marker_sheet.pdf`) and sticks at the lower right of the gauge. Found by a centre-surround response on an integral image, then verified along 96 directions (all five bands, relative to a per-direction outer edge); circle fit gives centre and size, the wedge gives rotation to <1° (`_wedgeAngle`). Stored with the calibration (`GaugeCalibration.marker`). See *Printed marker* below. |
+| Find it again | `gauge_setup.dart` `relocate` | The phone is not in the same place every session. With a marker in view, marker → face directly, checked by one tracked read. Otherwise, at session start (lever up), the same steps as calibration run on the new view: dial with the clearest needle, pivot on the needle line, needle at rest = zero. The difference to the stored zero is the phone's turn (accepted up to ±25°); background and template are turned with it, the template is recorded afresh; degrees-per-bar are kept. When the gauge is lost mid-shot only the position is updated (`keepZero`): the stored template is lined up with the found dial so face and pivot stay consistent. Runs in the background (`relocateInBackground`). |
 | Follow the gauge | `gauge_reader.dart` `track` | Normalised cross-correlation of the calibrated appearance template (face edge, bands, rim) over position and ±3 % scale. Lost for >20 frames → `DialLocator.find` on a background isolate. |
 | Learn the dial | `gauge_reader.dart` `learnBackground` | Every confident reading blends all directions ≥15° from the needle (and its tail) into a background image of the empty dial; it is saved with the calibration after each shot. Logo, text and screws then cancel out. |
 | Clean up values | `needle_filter.dart` | Impossible jumps dropped, One Euro smoothing (two switches in Settings). |
@@ -67,6 +68,34 @@ see wrong / missing pressure readings.
   `test/background_task_test.dart`.
 - The *first* calibration (old app) failed because the tapped circle was 1.5× the face: half of each
   needle ray sampled the black rim, and tracking followed the background.
+
+## Printed marker
+
+The user's idea: a printed sign next to the gauge "so it can act like a hook". Design and
+detection: `lib/vision/marker.dart` (header comment); printable sheet: `tool/marker_sheet.dart` →
+`assets/marker_sheet.pdf` (12/16/20 mm ring diameter, cut line at 1.4 R, 50 mm ruler, instructions),
+shared from Settings → *Print a marker*.
+
+- **Calibration** stores the marker pose next to the face. The face/marker relation (position,
+  scale, rotation) is what matters, so the marker may sit on the gauge (moves with it; best) or
+  on the machine (static; the gauge moves away from it).
+- **Each frame** (`GaugeReader.read`): the marker is searched near its last pose (`detectNear`, a few
+  ms), the face is predicted from the relation, then the template tracker refines it in a small
+  range. A successful track *confirms* the relation for this session (`_relToMarker`, updated each
+  frame, so a static marker works while the gauge moves down). When the dial cannot be matched
+  (lever, hand, blur) a confirmed relation alone gives the face, and the reading continues.
+- **Dial angles count from the face's tilt axis.** A marker-predicted face carries the phone's turn
+  in its tilt, so `relocated()` only shifts zero, template and background by the part of the turn
+  the new tilt does not already hold (`dialRot`). `Relocation.rotation` is the turn on screen.
+- **Relocation** trusts the marker only if one tracked read confirms the dial there; otherwise
+  (static marker, gauge moved; marker moved) the dial search runs and links the marker anew. A
+  marker stuck on after calibration is linked the same way at the next session start.
+- Measured: no false detections in the five machine photos; centre within 1 px, radius within 8 %,
+  rotation within 1° for R = 9–45 px, rotated and blurred. Test: `test/marker_test.dart`, including
+  the sheet itself rendered at 40 dpi (`test/fixtures/marker_sheet_40dpi.png`; re-render it with
+  `pdftoppm -r 40 -gray -png` when the sheet changes).
+- Geometry is defined twice, in `marker.dart` (detector) and `tool/marker_sheet.dart` (print).
+  Change both or neither.
 
 ## Diagnostic recordings (real shots)
 

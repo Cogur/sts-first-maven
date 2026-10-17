@@ -6,8 +6,11 @@ import 'package:flair_log/vision/luma_frame.dart';
 import 'package:image/image.dart' as img;
 
 /// Loads a (greyscale) JPEG test photo as an upright [LumaFrame].
-LumaFrame loadJpeg(String path) {
-  final im = img.decodeJpg(File(path).readAsBytesSync())!;
+LumaFrame loadJpeg(String path) => loadImage(path);
+
+/// Loads a JPEG or PNG test image as an upright [LumaFrame].
+LumaFrame loadImage(String path) {
+  final im = img.decodeImage(File(path).readAsBytesSync())!;
   final out = Uint8List(im.width * im.height);
   var i = 0;
   for (var y = 0; y < im.height; y++) {
@@ -91,4 +94,40 @@ LumaFrame rotatedFrame(LumaFrame f, double deg) {
     }
   }
   return LumaFrame(bytes: out, width: f.width, height: f.height, rowStride: f.width);
+}
+
+/// The frame as seen by a phone placed differently: rotated by [deg]
+/// (clockwise), scaled by [scale] about the frame centre, then moved by
+/// (tx, ty) pixels.
+LumaFrame movedPhoneFrame(LumaFrame f, {double deg = 0, double scale = 1, double tx = 0, double ty = 0}) {
+  final a = deg * pi / 180, c = cos(a), s = sin(a);
+  final cx = f.width / 2, cy = f.height / 2;
+  final out = Uint8List(f.width * f.height);
+  for (var y = 0; y < f.height; y++) {
+    for (var x = 0; x < f.width; x++) {
+      final dx = (x - tx - cx) / scale, dy = (y - ty - cy) / scale;
+      // Bilinear, like a camera that sees the scene, not resampled pixels.
+      final fx = cx + dx * c + dy * s, fy = cy - dx * s + dy * c;
+      final x0 = fx.floor(), y0 = fy.floor();
+      if (x0 < 0 || y0 < 0 || x0 + 1 >= f.width || y0 + 1 >= f.height) {
+        out[y * f.width + x] = 128;
+        continue;
+      }
+      final ax = fx - x0, ay = fy - y0;
+      int px(int xx, int yy) => f.bytes[yy * f.rowStride + xx];
+      out[y * f.width + x] = ((px(x0, y0) * (1 - ax) + px(x0 + 1, y0) * ax) * (1 - ay) +
+              (px(x0, y0 + 1) * (1 - ax) + px(x0 + 1, y0 + 1) * ax) * ay)
+          .round();
+    }
+  }
+  return LumaFrame(bytes: out, width: f.width, height: f.height, rowStride: f.width);
+}
+
+/// A copy of the region (x, y, w, h) of [f].
+LumaFrame cropFrame(LumaFrame f, int x, int y, int w, int h) {
+  final out = Uint8List(w * h);
+  for (var j = 0; j < h; j++) {
+    out.setRange(j * w, (j + 1) * w, f.bytes, (y + j) * f.rowStride + x);
+  }
+  return LumaFrame(bytes: out, width: w, height: h, rowStride: w);
 }

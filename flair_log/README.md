@@ -26,6 +26,11 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
   matches the dial's appearance in every frame and ignores the part of the
   rim the lever covers. If it loses the gauge, it searches the whole picture
   again ("Finding the gauge…" on the gauge view).
+- **Printed marker (optional).** Settings → *Print a marker* shares a PDF
+  sheet of small ring targets. Stick one at the lower right of the gauge and
+  calibrate again. The app then finds the gauge from the marker at once,
+  even when the phone stands a little differently, and keeps reading while
+  the lever covers the dial.
 - **Diagnostic recording** (Settings): saves what the camera sees during a
   shot and adds it to the shot export, so a misbehaving reading can be
   replayed and fixed.
@@ -64,14 +69,18 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
 1. Mount the phone (a small tripod or phone clamp) so it looks straight at the
    gauge with the lever up. Leave room below the gauge, because it travels
    down. Avoid strong reflections on the gauge glass.
-2. **Brew → target icon.** With the lever up, tap *Find the gauge*. Check
+2. Optional, but steadier: print the marker sheet (Settings → *Print a
+   marker*, at 100 %) and stick one marker at the lower right of the gauge,
+   on its rubber guard or housing, where the lever and your hand won't
+   cover it.
+3. **Brew → target icon.** With the lever up, tap *Find the gauge*. Check
    that the highlighted circle is your gauge (tap another one if not). On the
    zoomed view the blue line is the needle at 0. Tap the 10 mark and save.
    If the blue line is not on the needle, choose *Tap sets 0* and tap the 0
    mark yourself.
-3. Connect the scale (scale icon), put the cup on it, then tap
+4. Connect the scale (scale icon), put the cup on it, then tap
    **Tare & get ready**.
-4. Pull the shot. Recording starts and stops on its own, or use the buttons.
+5. Pull the shot. Recording starts and stops on its own, or use the buttons.
 
 ## Code map
 
@@ -80,6 +89,7 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
 | `lib/vision/dial_locator.dart` | Finds round dials, fits rim (circle/ellipse), hub candidates |
 | `lib/vision/gauge_reader.dart` | Needle detection, learned dial background, appearance tracking |
 | `lib/vision/gauge_setup.dart` | Calibration steps as pure functions (run on a background isolate) |
+| `lib/vision/marker.dart` | Printed marker detection; the sheet is made by `tool/marker_sheet.dart` → `assets/marker_sheet.pdf` |
 | `lib/vision/camera_gauge_source.dart` | Camera image stream → luma frames → readings, zoomed gauge view |
 | `lib/vision/gauge_calibration.dart` | Angle ↔ bar mapping, calibration storage |
 | `lib/vision/needle_filter.dart` | Jump rejection (rate limit + confirmation) and One Euro smoothing of readings |

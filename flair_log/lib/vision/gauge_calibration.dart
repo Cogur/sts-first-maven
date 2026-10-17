@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'dial_geometry.dart';
+import 'marker.dart';
 
 /// Everything the reader needs to know about one gauge in one camera setup.
 ///
@@ -29,6 +30,7 @@ class GaugeCalibration {
     this.faceScore = 0,
     this.background,
     this.template,
+    this.marker,
   });
 
   static const version = 2;
@@ -68,6 +70,17 @@ class GaugeCalibration {
   /// Appearance of the face edge, bands and rim at calibration, used to
   /// follow the gauge (see GaugeReader.track).
   final Uint8List? template;
+
+  /// The printed marker as seen at calibration (normalised like the face:
+  /// x of width, y of height, r of width), if one was in the picture. The
+  /// gauge's position, size and rotation are then known relative to it.
+  final MarkerPose? marker;
+
+  /// The marker in pixels of a frame of the given upright size.
+  MarkerPose? markerIn(int w, int h) {
+    final m = marker;
+    return m == null ? null : MarkerPose(m.cx * w, m.cy * h, m.r * w, m.angle, m.score);
+  }
 
   /// Face ellipse in pixels of a frame of the given upright size.
   DialGeometry face(int w, int h) => DialGeometry(
@@ -138,6 +151,7 @@ class GaugeCalibration {
         faceScore: faceScore,
         background: background ?? this.background,
         template: template,
+        marker: marker,
       );
 
   /// Builds a calibration from a located face, a pivot and the dial angles of
@@ -157,6 +171,7 @@ class GaugeCalibration {
     double zoom = 1,
     GaugeBackground? background,
     Uint8List? template,
+    MarkerPose? marker,
   }) {
     var sweep = _wrap(markAngle - zeroAngle);
     if (sweep < 0.05) sweep = 2 * math.pi - 0.01;
@@ -179,6 +194,10 @@ class GaugeCalibration {
       faceScore: face.score,
       background: background,
       template: template,
+      marker: marker == null
+          ? null
+          : MarkerPose(marker.cx / frameWidth, marker.cy / frameHeight,
+              marker.r / frameWidth, marker.angle, marker.score),
     );
   }
 
@@ -201,6 +220,13 @@ class GaugeCalibration {
         'faceScore': faceScore,
         if (background != null) 'background': background!.toJson(),
         if (template != null) 'template': base64Encode(template!),
+        if (marker != null)
+          'marker': {
+            'x': marker!.cx,
+            'y': marker!.cy,
+            'r': marker!.r,
+            'a': marker!.angle,
+          },
       };
 
   /// Returns null for calibrations from older app versions (they must be
@@ -228,6 +254,13 @@ class GaugeCalibration {
           ? null
           : GaugeBackground.fromJson(j['background'] as Map<String, dynamic>),
       template: j['template'] == null ? null : base64Decode(j['template'] as String),
+      marker: j['marker'] == null
+          ? null
+          : () {
+              final m = j['marker'] as Map<String, dynamic>;
+              return MarkerPose((m['x'] as num).toDouble(), (m['y'] as num).toDouble(),
+                  (m['r'] as num).toDouble(), (m['a'] as num).toDouble(), 1);
+            }(),
     );
   }
 }

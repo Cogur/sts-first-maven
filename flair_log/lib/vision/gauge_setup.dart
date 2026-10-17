@@ -7,6 +7,7 @@ import 'dial_locator.dart';
 import 'gauge_calibration.dart';
 import 'gauge_reader.dart';
 import 'luma_frame.dart';
+import 'marker.dart';
 
 /// What the app worked out by itself about a gauge from one still frame.
 class DialAnalysis {
@@ -18,9 +19,13 @@ class DialAnalysis {
     this.restAngle,
     this.restConfidence = 0,
     this.lineAngle,
+    this.marker,
   });
 
   final DialGeometry face;
+
+  /// The printed marker, if one is in the picture.
+  final MarkerPose? marker;
   final double pivotX, pivotY;
   final int polarity;
 
@@ -124,23 +129,60 @@ class GaugeSetup {
   ///
   /// With [keepZero] (the gauge was lost mid-shot, the needle is not at rest)
   /// only the position is updated.
+  ///
+  /// With a printed marker in view (see marker.dart) the marker gives
+  /// position, size and rotation directly; the dial is only checked to be
+  /// where the marker says.
   static GaugeCalibration? relocate(LumaFrame f, GaugeCalibration c, {bool keepZero = false}) {
+    final w = f.uprightWidth, h = f.uprightHeight;
+    // With a printed marker: fast and exact, also for the phone's rotation.
+    // A marker stuck on after calibration is linked by the dial search below.
+    final m0 = c.markerIn(w, h);
+    final m = MarkerDetector.detect(f);
+    GaugeCalibration? fromMarker;
+    if (m0 != null && m != null) {
+      final face = GaugeReader.faceFromMarker(c.face(w, h), m0, m);
+      final rot = m.angle - m0.angle;
+      fromMarker = GaugeReader.relocated(c, Relocation(face, rot, m.score), w, h, marker: m);
+      // The dial must be where the marker says. It is not when the marker
+      // sits on the machine and the gauge has moved down, or when the marker
+      // was moved: then the dial search below finds it and links it anew.
+      final check = (GaugeReader(fromMarker)..learn = false).read(f);
+      if (check != null && check.tracked) {
+        return GaugeReader.relocated(c, Relocation(check.face, rot, m.score), w, h, marker: m);
+      }
+    }
     for (final d in findDials(f, maxResults: 4)) {
       final a = analyse(f, d);
       if (!a.needleFound) continue; // no needle: not a gauge (shot mirror, cup)
+      // Screen rotation: the needle at rest seen in the new face's dial
+      // angles, plus how much the new face's tilt axis is turned.
+      final dt = a.face.tilt - c.tilt;
       var rot = 0.0;
       if (!keepZero) {
-        var diff = (a.restAngle! - c.zeroAngle) % (2 * math.pi);
+        var diff = (a.restAngle! + dt - c.zeroAngle) % (2 * math.pi);
         if (diff > math.pi) diff -= 2 * math.pi;
         if (diff.abs() <= maxRelocateTurn) rot = diff;
       }
+      if (keepZero && c.template != null) {
+        // The stored appearance is kept, so keep the calibrated face and
+        // pivot with it: line the appearance up with the dial just found
+        // (a fresh rim fit with the needle far round can sit a few pixels
+        // off, and the pivot with it).
+        final start = c.face(w, h).moved(a.face.cx, a.face.cy);
+        final t = GaugeReader(c).track(f, start, range: 0.5);
+        if (t != null && t.score >= GaugeReader.minMatch) {
+          return GaugeReader.relocated(c, Relocation(t, 0, t.score), w, h, marker: m);
+        }
+      }
       final r = Relocation(a.face, rot, a.restConfidence);
-      return GaugeReader.relocated(c, r, f.uprightWidth, f.uprightHeight,
+      return GaugeReader.relocated(c, r, w, h,
           pivotX: a.pivotX,
           pivotY: a.pivotY,
-          template: keepZero ? null : GaugeReader.captureTemplate(f, a.face));
+          template: keepZero ? null : GaugeReader.captureTemplate(f, a.face),
+          marker: m);
     }
-    return null;
+    return fromMarker;
   }
 
   /// Runs [task] on another isolate; if that is not possible, on this one
@@ -197,6 +239,7 @@ class GaugeSetup {
     final hit = GaugeReader.anyNeedle(f, ng);
     final line = GaugeReader.needleLine(f, face);
     return DialAnalysis(
+      marker: MarkerDetector.detect(f),
       lineAngle: line == null ? null : math.atan2(line.$4, line.$3),
       face: face,
       pivotX: pivot.$1,
@@ -242,6 +285,7 @@ class GaugeSetup {
       zoom: zoom,
       background: bg,
       template: GaugeReader.captureTemplate(frame, analysis.face),
+      marker: analysis.marker,
     );
   }
 

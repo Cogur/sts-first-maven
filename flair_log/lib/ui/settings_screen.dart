@@ -1,4 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../app_scope.dart';
 
@@ -69,12 +74,24 @@ class SettingsScreen extends StatelessWidget {
                   ? 'Not calibrated — open Brew and tap the target icon'
                   : '${s.calibration!.minValue.toStringAsFixed(0)}–'
                       '${s.calibration!.maxValue.toStringAsFixed(0)} bar, '
-                      '${s.calibration!.trackMovement ? 'following the gauge' : 'fixed position'}'),
+                      '${s.calibration!.trackMovement ? 'following the gauge' : 'fixed position'}'
+                      '${s.calibration!.marker != null ? ', with marker' : ''}'),
               trailing: s.calibration == null
                   ? null
                   : TextButton(
                       onPressed: () => s.calibration = null,
                       child: const Text('Reset')),
+            ),
+            Builder(
+              builder: (tileContext) => ListTile(
+                leading: const Icon(Icons.print_outlined),
+                title: const Text('Print a marker'),
+                subtitle: const Text(
+                    'A small printed target stuck at the lower right of the gauge '
+                    'keeps the gauge found, even while the lever covers it. Share '
+                    'the sheet to a printer, Drive or e-mail; then calibrate again.'),
+                onTap: () => _shareMarkerSheet(tileContext),
+              ),
             ),
             CheckboxListTile(
               title: const Text('Record camera for diagnostics'),
@@ -101,6 +118,22 @@ class SettingsScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Shares the printable marker sheet (assets/marker_sheet.pdf, made by
+/// tool/marker_sheet.dart).
+Future<void> _shareMarkerSheet(BuildContext context) async {
+  final box = context.findRenderObject() as RenderBox?;
+  final origin = box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+  final data = await rootBundle.load('assets/marker_sheet.pdf');
+  final dir = await getTemporaryDirectory();
+  final file = File('${dir.path}/flair_log_marker.pdf');
+  await file.writeAsBytes(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
+  await SharePlus.instance.share(ShareParams(
+    files: [XFile(file.path, mimeType: 'application/pdf')],
+    subject: 'Flair Log gauge marker',
+    sharePositionOrigin: origin,
+  ));
 }
 
 class _Header extends StatelessWidget {
