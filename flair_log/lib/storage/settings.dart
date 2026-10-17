@@ -70,6 +70,11 @@ class Settings extends ChangeNotifier {
   bool get rejectGaugeJumps => _prefs.getBool('rejectGaugeJumps') ?? true;
   set rejectGaugeJumps(bool v) => _set('rejectGaugeJumps', v);
 
+  /// Save what the camera sees during a shot (shared with the shot export)
+  /// so problems on a real phone can be reproduced.
+  bool get recordDiagnostics => _prefs.getBool('recordDiagnostics') ?? false;
+  set recordDiagnostics(bool v) => _set('recordDiagnostics', v);
+
   double get lastDose => _prefs.getDouble('lastDose') ?? 18;
   set lastDose(double v) => _set('lastDose', v);
 

@@ -33,18 +33,33 @@ class GaugeView extends StatelessWidget {
             ),
           );
         }
+        final lost = source.lastReading?.tracked == false;
+        final note = source.status ?? (lost ? 'Gauge lost, searching…' : null);
         return ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: CustomPaint(
-            painter: _GaugePainter(
-              roi: roi,
-              cal: cal,
-              reading: source.lastReading,
-              sample: source.latest,
-              color: ChartColors.pressure(Brightness.dark),
+          child: Stack(fit: StackFit.expand, children: [
+            CustomPaint(
+              painter: _GaugePainter(
+                roi: roi,
+                cal: cal,
+                reading: source.lastReading,
+                sample: source.latest,
+                color: ChartColors.pressure(Brightness.dark),
+              ),
             ),
-            child: const SizedBox.expand(),
-          ),
+            if (note != null)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Container(
+                  width: double.infinity,
+                  color: Colors.black54,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(note,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ),
+              ),
+          ]),
         );
       },
     );

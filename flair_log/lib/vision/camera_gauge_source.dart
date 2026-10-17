@@ -1,10 +1,12 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Directory, Platform;
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
+import 'diagnostic_recorder.dart';
 import 'gauge_setup.dart';
 import 'gauge_calibration.dart';
 import 'gauge_reader.dart';
@@ -48,8 +50,22 @@ class CameraGaugeSource extends PressureSource {
   /// learned about the empty dial; the app persists it.
   void Function(GaugeCalibration calibration)? onLearned;
 
-  bool _refinding = false;
-  DateTime _lastRefind = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _relocating = false;
+  bool _sessionLocated = false;
+  bool _inShot = false;
+  DateTime _lastRelocate = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// What the camera is busy with ("Finding the gauge…"), for the UI.
+  String? status;
+
+  /// Record what the camera sees during shots (Settings).
+  bool recordDiagnostics = false;
+  DiagnosticRecorder? _recorder;
+  bool _recorderStarting = false;
+  bool _wantRecording = false;
+
+  /// Path of the recording of the current / last shot.
+  String? recordingPath;
 
   /// Set to false when nobody is looking at the zoomed view, to save work.
   bool wantRoi = true;
@@ -152,6 +168,9 @@ class CameraGaugeSource extends PressureSource {
 
   @override
   void prepareForShot() {
+    _inShot = true;
+    recordingPath = null;
+    _wantRecording = recordDiagnostics;
     _reader?.resetTracking();
     filter.reset();
     // Freeze focus/exposure so the camera doesn't hunt during the shot.
@@ -164,6 +183,10 @@ class CameraGaugeSource extends PressureSource {
 
   @override
   void shotFinished() {
+    _inShot = false;
+    _wantRecording = false;
+    _recorder?.close();
+    _recorder = null;
     final reader = _reader;
     final bg = reader?.background;
     if (reader != null && bg != null) {
@@ -200,12 +223,19 @@ class CameraGaugeSource extends PressureSource {
         _grab = null;
         g.complete(frame.copy());
       }
+      if (_wantRecording) _record(frame);
       final reader = _reader;
       if (reader == null) return;
 
       final r = reader.read(frame);
       lastReading = r;
-      if (reader.lostFrames > 20) _refind(frame, reader);
+      // Session start: look for the gauge once (the phone may stand
+      // elsewhere than at calibration). Later: whenever it was lost.
+      if (!_sessionLocated && !_inShot) {
+        _relocate(frame, reader, keepZero: false);
+      } else if (reader.lostFrames > 6) {
+        _relocate(frame, reader, keepZero: _inShot);
+      }
       final raw = r != null && r.isValid ? r.value : null;
       final bar = filter.update(raw, now.microsecondsSinceEpoch / 1e6);
       _latest = PressureSample(
@@ -229,24 +259,60 @@ class CameraGaugeSource extends PressureSource {
     }
   }
 
-  /// The gauge was lost for over a second (bumped phone, fast lever): search
-  /// the whole frame for a dial of the calibrated size, in the background.
-  void _refind(LumaFrame frame, GaugeReader reader) {
+  /// Finds the gauge again in the whole picture, in the background: at the
+  /// start of a session (the phone is not in exactly the same place as at
+  /// calibration) and whenever it was lost for a moment. During a shot only
+  /// the position is updated; at the start, the needle at rest also re-sets
+  /// zero (and so absorbs a slightly turned phone).
+  void _relocate(LumaFrame frame, GaugeReader reader, {required bool keepZero}) {
     final now = DateTime.now();
-    if (_refinding || now.difference(_lastRefind).inMilliseconds < 2000) return;
-    _refinding = true;
-    _lastRefind = now;
-    final r = reader.calibration.face(frame.uprightWidth, frame.uprightHeight).radius;
+    if (_relocating || now.difference(_lastRelocate).inMilliseconds < 1500) return;
+    _relocating = true;
+    _lastRelocate = now;
+    status = 'Finding the gauge…';
+    notifyListeners();
     final copy = frame.copy();
-    GaugeSetup.findDialsInBackground(copy,
-            maxResults: 4, minRadius: 0.75 * r, maxRadius: 1.33 * r)
-        .then((found) {
-      // Only a dial that looks like this gauge and is near its last
-      // position counts (not the cup or the shot mirror).
-      if (!_disposed) reader.tryReacquire(copy, found);
+    GaugeSetup.relocateInBackground(copy, reader.calibration, keepZero: keepZero)
+        .then((cal) {
+      if (_disposed || cal == null) return;
+      reader.updateCalibration(cal);
+      filter.reset();
+      _sessionLocated = true;
+      onLearned?.call(cal); // remember the new position for next time
     }).catchError((Object e) {
-      debugPrint('re-find failed: $e');
-    }).whenComplete(() => _refinding = false);
+      debugPrint('relocate failed: $e');
+    }).whenComplete(() {
+      _relocating = false;
+      status = null;
+      notifyListeners();
+    });
+  }
+
+  void _record(LumaFrame frame) {
+    final rec = _recorder;
+    if (rec != null) {
+      rec.add(frame);
+      return;
+    }
+    if (_recorderStarting) return;
+    _recorderStarting = true;
+    final first = frame.copy();
+    final face = lastReading?.face ??
+        calibration?.face(frame.uprightWidth, frame.uprightHeight);
+    getApplicationDocumentsDirectory().then((dir) async {
+      await Directory('${dir.path}/diagnostics').create(recursive: true);
+      final path =
+          '${dir.path}/diagnostics/shot_${DateTime.now().millisecondsSinceEpoch}.flr';
+      final r = await DiagnosticRecorder.start(path, first, face);
+      if (_wantRecording && !_disposed) {
+        _recorder = r;
+        recordingPath = path;
+      } else {
+        await r.close();
+      }
+    }).catchError((Object e) {
+      debugPrint('diagnostic recording failed: $e');
+    }).whenComplete(() => _recorderStarting = false);
   }
 
   void _renderRoi(LumaFrame f, GaugeReading? r) {

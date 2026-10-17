@@ -47,6 +47,7 @@ class Shot {
     this.grind = '',
     this.notes = '',
     this.rating = 0,
+    this.diagnostics,
   });
 
   final String id;
@@ -57,6 +58,9 @@ class Shot {
   String grind;
   String notes;
   int rating;
+
+  /// Path of the camera diagnostic recording of this shot, if one was made.
+  String? diagnostics;
 
   double get duration => samples.isEmpty ? 0 : samples.last.t;
 
@@ -109,6 +113,7 @@ class Shot {
         'grind': grind,
         'notes': notes,
         'rating': rating,
+        if (diagnostics != null) 'diagnostics': diagnostics,
         'samples': samples.map((s) => s.toJson()).toList(),
       };
 
@@ -120,6 +125,7 @@ class Shot {
         grind: j['grind'] as String? ?? '',
         notes: j['notes'] as String? ?? '',
         rating: (j['rating'] as num?)?.toInt() ?? 0,
+        diagnostics: j['diagnostics'] as String?,
         samples: (j['samples'] as List)
             .map((e) => ShotSample.fromJson(e as Map<String, dynamic>))
             .toList(),

@@ -39,6 +39,21 @@ class GaugeReading {
   bool get isValid => confidence >= GaugeReader.minConfidence;
 }
 
+/// Where the calibrated gauge was found in a new view.
+class Relocation {
+  Relocation(this.face, this.rotation, this.score);
+
+  /// Dial face in the new view.
+  final DialGeometry face;
+
+  /// How much the dial appears turned compared with calibration (radians,
+  /// clockwise): the phone is held a little differently.
+  final double rotation;
+
+  /// Appearance correlation (1 = identical).
+  final double score;
+}
+
 /// A needle found in one polar sample.
 class NeedleHit {
   const NeedleHit(this.angle, this.confidence);
@@ -72,6 +87,7 @@ class GaugeReader {
   bool learn = true;
 
   static const double minConfidence = 4.0;
+  static const double windowConfidence = 2.5;
   static const double learnConfidence = 7.0;
   static const double rho0 = 0.28, rho1 = 0.82;
   static const int nA = GaugeBackground.angles;
@@ -84,6 +100,8 @@ class GaugeReader {
       List.generate(nA, (a) => math.sin(2 * math.pi * a / nA));
 
   DialGeometry? _face;
+  DialGeometry? _prevFace;
+  double _lastMatch = 1;
   bool _wide = true;
   int _lostFrames = 0;
 
@@ -107,6 +125,7 @@ class GaugeReader {
   /// Start again from the calibrated position (new shot, gauge at rest).
   void resetTracking() {
     _face = null;
+    _prevFace = null;
     _wide = true;
     _lostFrames = 0;
     _lastAngle = null;
@@ -115,6 +134,7 @@ class GaugeReader {
   /// Jump to a face position found elsewhere (e.g. by a full re-search).
   void reacquire(DialGeometry face) {
     _face = face;
+    _prevFace = null;
     _wide = false;
     _lostFrames = 0;
   }
@@ -124,7 +144,20 @@ class GaugeReader {
     if (face.radius < 6) return null;
     var tracked = true;
     if (calibration.trackMovement) {
-      final t = track(f, face, wide: _wide);
+      // The gauge moves steadily with the piston: start the search where it
+      // will be if it keeps its speed (limited to a third of a radius).
+      final prev = _prevFace;
+      var start = face;
+      if (prev != null && _face != null && !_wide) {
+        var vx = face.cx - prev.cx, vy = face.cy - prev.cy;
+        final v = math.sqrt(vx * vx + vy * vy), vmax = 0.33 * face.radius;
+        if (v > vmax) {
+          vx *= vmax / v;
+          vy *= vmax / v;
+        }
+        start = face.moved(face.cx + vx, face.cy + vy);
+      }
+      final t = track(f, start, range: _wide ? 0.8 : (_lastMatch < 0.8 ? 0.5 : 0.3));
       final need = _template != null
           ? minMatch
           : (calibration.faceScore > 0 ? 0.45 * calibration.faceScore : 15);
@@ -135,9 +168,11 @@ class GaugeReader {
         face = k < 0.85 || k > 1.2
             ? t.moved(t.cx, t.cy, scale: k.clamp(0.85, 1.2) / k)
             : t;
+        _prevFace = _face;
         _face = face;
         _wide = false;
         _lostFrames = 0;
+        _lastMatch = t.score;
       } else {
         _wide = true;
         _lostFrames++;
@@ -153,7 +188,9 @@ class GaugeReader {
     if (last != null && _sinceLast < 8) {
       hit = findNeedle(polar, calibration.polarity,
           range: (last - _window, last + _window), background: _bg, exclude: hidden);
-      if (hit != null && hit.confidence < minConfidence) hit = null;
+      // Being right next to where the needle just was is evidence in
+      // itself: a lower bar here than for a jump across the dial.
+      if (hit != null && hit.confidence < windowConfidence) hit = null;
     }
     hit ??= findNeedle(polar, calibration.polarity,
         range: calibration.searchRange, background: _bg, exclude: hidden);
@@ -352,6 +389,66 @@ class GaugeReader {
     return math.min(p, 2 * math.pi - p);
   }
 
+  // ---- relocation: the phone is not in the same place every time -----------
+
+  /// The calibration moved to where [r] found the gauge in a frame of the
+  /// given size: position and size from the new view, and zero mark, pivot,
+  /// learned background and appearance template turned by the rotation.
+  static GaugeCalibration relocated(GaugeCalibration c, Relocation r, int w, int h,
+      {double? pivotX, double? pivotY, Uint8List? template}) {
+    final rot = r.rotation;
+    final cs = math.cos(rot), sn = math.sin(rot);
+    // Template: a fresh one from the new view if given, else the old one
+    // with its direction columns shifted by the rotation (4° steps).
+    Uint8List? tmpl = template;
+    final old = c.template;
+    if (tmpl == null && old != null && old.length == _tRho.length * _tN) {
+      var shift = (rot / (2 * math.pi) * _tN).round() % _tN;
+      if (shift < 0) shift += _tN;
+      tmpl = Uint8List(old.length);
+      for (var k = 0; k < _tRho.length; k++) {
+        for (var d = 0; d < _tN; d++) {
+          tmpl[k * _tN + (d + shift) % _tN] = old[k * _tN + d];
+        }
+      }
+    }
+    // Background: same, at 1° resolution.
+    GaugeBackground? bg;
+    final ob = c.background;
+    if (ob != null) {
+      var shift = (rot / (2 * math.pi) * nA).round() % nA;
+      if (shift < 0) shift += nA;
+      bg = GaugeBackground.empty();
+      for (var a = 0; a < nA; a++) {
+        final na = (a + shift) % nA;
+        bg.seen[na] = ob.seen[a];
+        for (var k = 0; k < nK; k++) {
+          bg.values[k * nA + na] = ob.values[k * nA + a];
+        }
+      }
+    }
+    final face = r.face;
+    return GaugeCalibration(
+      faceX: face.cx / w,
+      faceY: face.cy / h,
+      faceRx: face.rx / w,
+      faceRy: face.ry / w,
+      tilt: face.tilt,
+      pivotDx: pivotX != null ? (pivotX - face.cx) / face.radius : c.pivotDx * cs - c.pivotDy * sn,
+      pivotDy: pivotY != null ? (pivotY - face.cy) / face.radius : c.pivotDx * sn + c.pivotDy * cs,
+      zeroAngle: c.zeroAngle + rot,
+      sweep: c.sweep,
+      minValue: c.minValue,
+      maxValue: c.maxValue,
+      polarity: c.polarity,
+      trackMovement: c.trackMovement,
+      zoom: c.zoom,
+      faceScore: c.faceScore,
+      background: bg,
+      template: tmpl,
+    );
+  }
+
   // ---- occlusion ----------------------------------------------------------
 
   /// Directions (needle polar indices) where something covers the rim, e.g.
@@ -390,23 +487,43 @@ class GaugeReader {
     // look off-centre (seen from below, the rim hides its top), so a rim ring
     // of the face can come within reach of the needle tip.
     const rimRings = [4, 5, 6]; // rho 0.95, 1.05, 1.15
-    final res = Float64List(_tN);
+    // Per direction: how many rim rings differ strongly from the template.
+    // A pixel or two of tracking error makes the sharp rim edge differ on
+    // one ring; an occluder changes the whole rim band.
+    final diffs = <double>[];
+    final res = List.generate(_tN, (_) => <double>[]);
     for (var d = 0; d < _tN; d++) {
-      var sum = 0.0, m = 0;
       for (final k in rimRings) {
         final i = k * _tN + d;
         if (!ok[i]) continue;
         final p = face.point(2 * math.pi * d / _tN, _tRho[k]);
         if (ng.polarOf(p.$1, p.$2).$2 < 0.97) continue;
-        sum += (vals[i] - (a * raw[i] + b)).abs();
-        m++;
+        final r = (vals[i] - (a * raw[i] + b)).abs();
+        res[d].add(r);
+        diffs.add(r);
       }
-      res[d] = m == 0 ? 0 : sum / m;
     }
-    final sorted = Float64List.fromList(res)..sort();
-    final typical = sorted[_tN ~/ 2];
-    final limit = math.max(30.0, 3 * typical);
-    final covered = [for (final r in res) r > limit];
+    if (diffs.isEmpty) return null;
+    diffs.sort();
+    final typical = diffs[diffs.length ~/ 2];
+    final limit = math.max(40.0, 4 * typical);
+    final strong = [
+      for (final r in res) r.length >= 2 && r.where((x) => x > limit).length >= 2
+    ];
+    // Only stretches of at least 3 directions (12°) count as covered.
+    final covered = List<bool>.filled(_tN, false);
+    for (var d = 0; d < _tN; d++) {
+      if (!strong[d]) continue;
+      var run = 1;
+      while (run < _tN && strong[(d + run) % _tN]) {
+        run++;
+      }
+      var back = 1;
+      while (back < _tN && strong[(d - back + _tN) % _tN]) {
+        back++;
+      }
+      if (run + back - 1 >= 3) covered[d] = true;
+    }
     if (!covered.contains(true)) return null;
     // Map to needle directions: which template direction does the rim
     // point of each needle direction fall into?
@@ -624,37 +741,6 @@ class GaugeReader {
   Float64List? get _template =>
       _tmpl ??= calibration.template == null ? null : normalise(calibration.template!);
 
-  /// Picks the re-found dial that really is this gauge: it must match the
-  /// calibrated appearance and lie within reach of the last known position
-  /// (the gauge travels with the piston, it does not jump across the frame).
-  /// Returns true if tracking was re-acquired.
-  bool tryReacquire(LumaFrame f, List<DialGeometry> candidates) {
-    final tmpl = _template;
-    final last = _face ?? calibration.face(f.uprightWidth, f.uprightHeight);
-    final reach = 3.0 * last.radius;
-    DialGeometry? best;
-    var bestScore = reacquireMatch;
-    for (final c in candidates) {
-      final d = math.sqrt(math.pow(c.cx - last.cx, 2) + math.pow(c.cy - last.cy, 2));
-      if (d > reach) continue;
-      // Re-use the calibrated shape at the found position; then polish.
-      final g = track(f, last.moved(c.cx, c.cy)) ?? last.moved(c.cx, c.cy);
-      final sc = tmpl == null ? 1.0 : match(f, g, tmpl);
-      // A round thing that is not a gauge has no needle (shot mirror).
-      if (sc >= bestScore &&
-          (anyNeedle(f, GaugeCalibration.needleGeometry(g, calibration.pivotDx, calibration.pivotDy))
-                      ?.$1
-                      .confidence ??
-                  0) >= reacquireNeedle) {
-        bestScore = sc;
-        best = g;
-      }
-    }
-    if (best == null) return false;
-    reacquire(best);
-    return true;
-  }
-
   /// Correlation below which the gauge counts as lost.
   static const double minMatch = 0.6;
 
@@ -667,17 +753,17 @@ class GaugeReader {
   /// where the calibrated appearance matches best. Returns the geometry with
   /// the correlation as its score. Falls back to the face score without a
   /// template.
-  DialGeometry? track(LumaFrame f, DialGeometry face, {bool wide = false}) {
+  DialGeometry? track(LumaFrame f, DialGeometry face, {bool wide = false, double? range}) {
     final tmpl = _template;
     double score(DialGeometry g) =>
         tmpl != null ? match(f, g, tmpl) : DialLocator.faceScore(f, g, n: 32);
     final r = face.radius;
     var best = face;
     var bestScore = score(face);
-    final range = (wide ? 0.8 : 0.25) * r;
+    final reach = (range ?? (wide ? 0.8 : 0.25)) * r;
     final step = math.max(1.0, 0.05 * r);
-    for (var dy = -range; dy <= range + 1e-9; dy += step) {
-      for (var dx = -range; dx <= range + 1e-9; dx += step) {
+    for (var dy = -reach; dy <= reach + 1e-9; dy += step) {
+      for (var dx = -reach; dx <= reach + 1e-9; dx += step) {
         final g = face.moved(face.cx + dx, face.cy + dy);
         final s = score(g);
         if (s > bestScore) {

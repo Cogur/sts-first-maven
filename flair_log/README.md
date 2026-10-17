@@ -17,10 +17,18 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
   dial. Logo, text and screws then cancel out and the needle stands out more
   clearly with every shot. The learned picture is saved with the
   calibration.
+- **Phone doesn't have to stand in the same place.** Each time the Brew
+  screen opens (lever up), the app finds the gauge again anywhere in the
+  picture and re-sets zero from the needle, which also corrects a phone that
+  is turned a little. Calibrate once; place the phone roughly the same way.
 - **Follows the moving gauge.** On the Flair 58 the gauge sits on the piston
-  stem and moves down during the shot. The reader matches the dial's
-  appearance in every frame. If it loses the gauge (a bumped phone), it
-  searches the whole picture again.
+  stem and moves down during the shot. The reader predicts the movement,
+  matches the dial's appearance in every frame and ignores the part of the
+  rim the lever covers. If it loses the gauge, it searches the whole picture
+  again ("Finding the gauge…" on the gauge view).
+- **Diagnostic recording** (Settings): saves what the camera sees during a
+  shot and adds it to the shot export, so a misbehaving reading can be
+  replayed and fixed.
 - About 15 readings per second from 1080p video. Details:
   [docs/gauge-reading.md](docs/gauge-reading.md).
 - **Steady needle.** Two switches (Settings, or the slider icon on the Brew

@@ -75,3 +75,20 @@ LumaFrame shiftedFrame(LumaFrame f, int dy, {(int, int, int, int)? bar}) {
   }
   return LumaFrame(bytes: out, width: f.width, height: f.height, rowStride: f.width);
 }
+
+/// The frame rotated by [deg] degrees (clockwise) about its centre, like a
+/// phone held slightly turned.
+LumaFrame rotatedFrame(LumaFrame f, double deg) {
+  final a = deg * pi / 180, c = cos(a), s = sin(a);
+  final cx = f.width / 2, cy = f.height / 2;
+  final out = Uint8List(f.width * f.height);
+  for (var y = 0; y < f.height; y++) {
+    for (var x = 0; x < f.width; x++) {
+      final dx = x - cx, dy = y - cy;
+      final sx = (cx + dx * c + dy * s).round(), sy = (cy - dx * s + dy * c).round();
+      out[y * f.width + x] =
+          sx >= 0 && sy >= 0 && sx < f.width && sy < f.height ? f.bytes[sy * f.rowStride + sx] : 128;
+    }
+  }
+  return LumaFrame(bytes: out, width: f.width, height: f.height, rowStride: f.width);
+}

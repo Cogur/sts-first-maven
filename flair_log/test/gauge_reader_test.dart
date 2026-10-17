@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 
-import 'package:flair_log/vision/dial_geometry.dart';
 import 'package:flair_log/vision/dial_locator.dart';
 import 'package:flair_log/vision/gauge_calibration.dart';
 import 'package:flair_log/vision/gauge_reader.dart';
@@ -263,17 +262,43 @@ void main() {
       }
     });
 
-    test('photo 2: after losing the gauge, the mirror and the cup are not taken', () {
-      final f = loadJpeg('test/fixtures/machine_2.jpg');
-      final dials = GaugeSetup.findDials(f);
-      final a = GaugeSetup.analyse(f, dials.first);
+    test('phone placed differently: calibrated on photo 2, found again in 1, 4, 5', () {
+      final f2 = loadJpeg('test/fixtures/machine_2.jpg');
+      final a = GaugeSetup.analyse(f2, GaugeSetup.findDials(f2).first);
       final cal = GaugeSetup.build(
-          frame: f, analysis: a, zeroAngle: a.restAngle!,
+          frame: f2, analysis: a, zeroAngle: a.restAngle!,
           markAngle: a.restAngle! + sweep10, markValue: 10);
-      const mirror = DialGeometry.circle(471.3, 887.5, 70.4);
-      const cup = DialGeometry.circle(657.7, 1191.3, 19.1);
-      expect(GaugeReader(cal).tryReacquire(f, [mirror, cup]), isFalse);
-      expect(GaugeReader(cal).tryReacquire(f, [mirror, dials.first]), isTrue);
+      for (final (i, hub) in [(1, hubs[1]!), (4, hubs[4]!), (5, hubs[5]!)]) {
+        final f = loadJpeg('test/fixtures/machine_$i.jpg');
+        final moved = GaugeSetup.relocate(f, cal);
+        expect(moved, isNotNull, reason: 'photo $i');
+        final face = moved!.face(f.uprightWidth, f.uprightHeight);
+        final pivot = GaugeCalibration.needleGeometry(face, moved.pivotDx, moved.pivotDy);
+        expect(pivot.cx, closeTo(hub.$1, 5), reason: 'photo $i pivot');
+        expect(pivot.cy, closeTo(hub.$2, 5), reason: 'photo $i pivot');
+        final r = GaugeReader(moved).read(f)!;
+        expect(r.value, closeTo(0, 0.3), reason: 'photo $i at rest');
+        expect(moved.sweep, cal.sweep);
+      }
+    });
+
+    test('phone turned by 12°: found again and reads zero', () {
+      final f2 = loadJpeg('test/fixtures/machine_2.jpg');
+      final a = GaugeSetup.analyse(f2, GaugeSetup.findDials(f2).first);
+      final cal = GaugeSetup.build(
+          frame: f2, analysis: a, zeroAngle: a.restAngle!,
+          markAngle: a.restAngle! + sweep10, markValue: 10);
+      final f = rotatedFrame(f2, 12);
+      final moved = GaugeSetup.relocate(f, cal)!;
+      expect((moved.zeroAngle - cal.zeroAngle) / deg, closeTo(12, 7));
+      expect(GaugeReader(moved).read(f)!.value, closeTo(0, 0.3));
+    });
+
+    test('the shot mirror is never taken for the gauge', () {
+      final f = loadJpeg('test/fixtures/machine_5.jpg');
+      final first = GaugeSetup.findDials(f).first;
+      // The mirror sits at about (513, 902); the gauge at (636, 569).
+      expect(first.cy, lessThan(700));
     });
   });
 }

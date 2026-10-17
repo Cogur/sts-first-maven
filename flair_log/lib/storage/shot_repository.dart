@@ -56,6 +56,8 @@ class ShotRepository extends ChangeNotifier {
   Future<void> delete(Shot shot) async {
     final f = _file(shot.id);
     if (await f.exists()) await f.delete();
+    final d = shot.diagnostics == null ? null : File(shot.diagnostics!);
+    if (d != null && await d.exists()) await d.delete();
     _shots.removeWhere((s) => s.id == shot.id);
     notifyListeners();
   }
@@ -68,6 +70,7 @@ class ShotRepository extends ChangeNotifier {
     final csv = File('${tmp.path}/$base.csv');
     await json.writeAsString(const JsonEncoder.withIndent('  ').convert(shot.toJson()));
     await csv.writeAsString(shot.toCsv());
-    return [csv, json];
+    final diag = shot.diagnostics == null ? null : File(shot.diagnostics!);
+    return [csv, json, if (diag != null && await diag.exists()) diag];
   }
 }

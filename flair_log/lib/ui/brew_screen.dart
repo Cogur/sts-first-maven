@@ -72,10 +72,14 @@ class _BrewScreenState extends State<BrewScreen> {
     _source.filter
       ..smooth = _settings.smoothGauge
       ..rejectJumps = _settings.rejectGaugeJumps;
+    final src = _source;
+    if (src is CameraGaugeSource) src.recordDiagnostics = _settings.recordDiagnostics;
   }
 
   Future<void> _onFinished(Shot shot) async {
     final app = AppScope.of(context);
+    final src = _source;
+    if (src is CameraGaugeSource) shot.diagnostics = src.recordingPath;
     await app.shots.save(shot);
     HapticFeedback.mediumImpact();
     if (!mounted) return;

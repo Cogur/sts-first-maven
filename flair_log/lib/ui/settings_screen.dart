@@ -76,6 +76,15 @@ class SettingsScreen extends StatelessWidget {
                       onPressed: () => s.calibration = null,
                       child: const Text('Reset')),
             ),
+            CheckboxListTile(
+              title: const Text('Record camera for diagnostics'),
+              subtitle: const Text(
+                  'Saves what the camera sees around the gauge during a shot '
+                  '(about 20–30 MB). It is added to the shot export, so you can '
+                  'send it when the gauge reading misbehaves.'),
+              value: s.recordDiagnostics,
+              onChanged: (v) => s.recordDiagnostics = v ?? false,
+            ),
             const _Header('Try it out'),
             SwitchListTile(
               title: const Text('Demo mode'),

@@ -12,6 +12,7 @@ see wrong / missing pressure readings.
 | Find the pivot | `dial_locator.dart` `hubCandidates`, `gauge_reader.dart` `choosePivot` | Small round shapes near the centre (Hough), keeping the strongest one that lies on the needle line (`needleLine`, a Radon-style search). |
 | Zero and scale | `calibration_screen.dart`, `gauge_setup.dart` | Lever up: the needle position is 0 bar. The user taps one numbered mark (10 on the Flair gauge) and types its number. |
 | Read each frame | `gauge_reader.dart` `read` | Polar samples around the pivot (360 directions × 20 rings, 0.28–0.82 of the face radius). Needle = direction that differs from the empty dial in the inner half **and** the outer half of the rings. |
+| Find it again | `gauge_setup.dart` `relocate` | The phone is not in the same place every session. At session start (lever up) the same steps as calibration run on the new view: dial with the clearest needle, pivot on the needle line, needle at rest = zero. The difference to the stored zero is the phone's turn (accepted up to ±25°); background and template are turned with it, the template is recorded afresh; degrees-per-bar are kept. When the gauge is lost mid-shot only the position is updated (`keepZero`). Runs in the background (`relocateInBackground`). |
 | Follow the gauge | `gauge_reader.dart` `track` | Normalised cross-correlation of the calibrated appearance template (face edge, bands, rim) over position and ±3 % scale. Lost for >20 frames → `DialLocator.find` on a background isolate. |
 | Learn the dial | `gauge_reader.dart` `learnBackground` | Every confident reading blends all directions ≥15° from the needle (and its tail) into a background image of the empty dial; it is saved with the calibration after each shot. Logo, text and screws then cancel out. |
 | Clean up values | `needle_filter.dart` | Impossible jumps dropped, One Euro smoothing (two switches in Settings). |
@@ -51,6 +52,13 @@ see wrong / missing pressure readings.
     then on the whole scale; readings beyond 1.5× the reference mark are treated as misreads.
   - A strongly oblique view (`machine_3.jpg`, looking up at the gauge) is not handled yet: frame
     the gauge from the front, or tap it.
+  - **Matching the stored appearance does not work across phone positions**: the fitted face circle
+    sits differently relative to the pivot from each viewpoint (whole-ring and per-ring correlation
+    both failed, the mirror scored as high as the gauge). Relocation therefore re-runs the
+    calibration analysis and uses the needle at rest for zero.
+  - The occlusion check once flagged the needle's own direction: a 1–2 px tracking error makes the
+    sharp rim edge differ on one ring. A direction counts as covered only if ≥2 of its 3 rim rings
+    differ strongly, over ≥12°. Near the last needle position a lower confidence (2.5) is accepted.
 - **Background work goes through `compute(topLevelFunction, request)`** (`GaugeSetup.findDialsInBackground`,
   `analyseInBackground`), never `Isolate.run(() => ...)` in widget code. A closure shares its captured
   context with the other closures of the same method; one holding a `ui.Image` or the `State` makes
@@ -59,6 +67,17 @@ see wrong / missing pressure readings.
   `test/background_task_test.dart`.
 - The *first* calibration (old app) failed because the tapped circle was 1.5× the face: half of each
   needle ray sampled the black rim, and tracking followed the background.
+
+## Diagnostic recordings (real shots)
+
+Settings → *Record camera for diagnostics*. During each shot the app writes
+`documents/diagnostics/shot_<ms>.flr` (`diagnostic_recorder.dart`): one half-resolution whole view,
+then every second frame of a fixed full-resolution region around the gauge, extended downwards (the
+gauge travels down), ≤420 frames, ~20–30 MB. It is attached to the shot export.
+
+To reproduce a reported failure: put the file in `test/fixtures/`, load it with
+`loadRecording()` (`test/support/recording.dart`) and replay the frames through `GaugeReader`
+(see `test/recording_test.dart`). Keep it as a regression test if it is small enough, or trim it.
 
 ## Tests and fixtures
 

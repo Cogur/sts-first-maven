@@ -80,6 +80,16 @@ class AnalyseRequest {
 
 DialAnalysis analyseTask(AnalyseRequest r) => GaugeSetup.analyse(r.frame, r.face);
 
+class RelocateRequest {
+  const RelocateRequest(this.frame, this.calibration, this.keepZero);
+  final LumaFrame frame;
+  final GaugeCalibration calibration;
+  final bool keepZero;
+}
+
+GaugeCalibration? relocateTask(RelocateRequest r) =>
+    GaugeSetup.relocate(r.frame, r.calibration, keepZero: r.keepZero);
+
 /// Calibration steps as pure functions; the `...InBackground` variants run
 /// them on another isolate.
 class GaugeSetup {
@@ -96,6 +106,42 @@ class GaugeSetup {
 
   static Future<DialAnalysis> analyseInBackground(LumaFrame f, DialGeometry face) =>
       _background(analyseTask, AnalyseRequest(f, face));
+
+  static Future<GaugeCalibration?> relocateInBackground(LumaFrame f, GaugeCalibration c,
+          {bool keepZero = false}) =>
+      _background(relocateTask, RelocateRequest(f, c, keepZero));
+
+  /// Largest phone rotation accepted from the needle at rest.
+  static const double maxRelocateTurn = 25 * math.pi / 180;
+
+  /// Finds the calibrated gauge in a new view (the phone is not in exactly
+  /// the same place every time). Uses the same steps as calibration: the
+  /// round thing with the clearest needle, its pivot, and the needle at rest
+  /// (the lever is up when a session starts), which marks zero. How far
+  /// that is from the stored zero tells how much the phone is turned; the
+  /// learned background is turned with it and the appearance template is
+  /// recorded afresh. The bar-per-degree scale is kept.
+  ///
+  /// With [keepZero] (the gauge was lost mid-shot, the needle is not at rest)
+  /// only the position is updated.
+  static GaugeCalibration? relocate(LumaFrame f, GaugeCalibration c, {bool keepZero = false}) {
+    for (final d in findDials(f, maxResults: 4)) {
+      final a = analyse(f, d);
+      if (!a.needleFound) continue; // no needle: not a gauge (shot mirror, cup)
+      var rot = 0.0;
+      if (!keepZero) {
+        var diff = (a.restAngle! - c.zeroAngle) % (2 * math.pi);
+        if (diff > math.pi) diff -= 2 * math.pi;
+        if (diff.abs() <= maxRelocateTurn) rot = diff;
+      }
+      final r = Relocation(a.face, rot, a.restConfidence);
+      return GaugeReader.relocated(c, r, f.uprightWidth, f.uprightHeight,
+          pivotX: a.pivotX,
+          pivotY: a.pivotY,
+          template: keepZero ? null : GaugeReader.captureTemplate(f, a.face));
+    }
+    return null;
+  }
 
   /// Runs [task] on another isolate; if that is not possible, on this one
   /// (a short freeze is better than hanging forever).
