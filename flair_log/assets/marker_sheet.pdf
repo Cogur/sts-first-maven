@@ -9,7 +9,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>
 endobj
 4 0 obj
-<< /Length 28219 >>
+<< /Length 28252 >>
 stream
 0 g BT /F2 18.00 Tf 56.69 779.53 Td (Flair Log gauge marker) Tj ET
 0 g BT /F1 10.00 Tf 56.69 754.02 Td (Print at 100 % \(actual size, not "fit to page"\). The ruler must measure 50 mm.) Tj ET
@@ -942,9 +942,9 @@ S Q
 0 g BT /F2 11.00 Tf 56.69 339.59 Td (How to use it) Tj ET
 0 g BT /F1 9.50 Tf 56.69 319.75 Td (1. Cut one marker out along the dashed circle. Keep the white border: the) Tj ET
 0 g BT /F1 9.50 Tf 56.69 305.01 Td (    app needs it to see the edge of the black ring.) Tj ET
-0 g BT /F1 9.50 Tf 56.69 290.27 Td (2. Stick it flat, facing the phone, at the lower right of the gauge: on the) Tj ET
-0 g BT /F1 9.50 Tf 56.69 275.53 Td (    rubber guard or the gauge housing, so it moves down with the gauge.) Tj ET
-0 g BT /F1 9.50 Tf 56.69 260.79 Td (    On the machine next to the gauge works too.) Tj ET
+0 g BT /F1 9.50 Tf 56.69 290.27 Td (2. Stick it on the gauge, lower right, facing the phone: on the glass over) Tj ET
+0 g BT /F1 9.50 Tf 56.69 275.53 Td (    the logo \(keep the 0-11 bar scale free\) or on the rubber guard. On the) Tj ET
+0 g BT /F1 9.50 Tf 56.69 260.79 Td (    gauge it moves with it and the app finds the dial from the marker alone.) Tj ET
 0 g BT /F1 9.50 Tf 56.69 246.05 Td (3. It must stay in view during the whole shot: not under the lever or your) Tj ET
 0 g BT /F1 9.50 Tf 56.69 231.31 Td (    hand, and without glare \(plain paper; no glossy tape over it\).) Tj ET
 0 g BT /F1 9.50 Tf 56.69 216.57 Td (4. The wedge may point any way, but the marker must not move afterwards.) Tj ET
@@ -965,10 +965,10 @@ xref
 0000000058 00000 n 
 0000000115 00000 n 
 0000000257 00000 n 
-0000028528 00000 n 
-0000028625 00000 n 
+0000028561 00000 n 
+0000028658 00000 n 
 trailer
 << /Size 7 /Root 1 0 R >>
 startxref
-28727
+28760
 %%EOF

@@ -27,10 +27,11 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
   rim the lever covers. If it loses the gauge, it searches the whole picture
   again ("Finding the gauge…" on the gauge view).
 - **Printed marker (optional).** Settings → *Print a marker* shares a PDF
-  sheet of small ring targets. Stick one at the lower right of the gauge and
-  calibrate again. The app then finds the gauge from the marker at once,
-  even when the phone stands a little differently, and keeps reading while
-  the lever covers the dial.
+  sheet of small ring targets. Stick one on the gauge, lower right (on the
+  glass over the logo, or on the rubber guard), and calibrate again. The app
+  then finds the gauge from the marker in every frame, also right after the
+  phone was moved or bumped, and keeps reading while the lever covers the
+  dial.
 - **Diagnostic recording** (Settings): saves what the camera sees during a
   shot and adds it to the shot export, so a misbehaving reading can be
   replayed and fixed.
@@ -70,9 +71,9 @@ scale (BOOKOO Themis Mini / Ultra) and draws the shot as a graph.
    gauge with the lever up. Leave room below the gauge, because it travels
    down. Avoid strong reflections on the gauge glass.
 2. Optional, but steadier: print the marker sheet (Settings → *Print a
-   marker*, at 100 %) and stick one marker at the lower right of the gauge,
-   on its rubber guard or housing, where the lever and your hand won't
-   cover it.
+   marker*, at 100 %) and stick one marker on the gauge, lower right: on the
+   glass over the logo (keep the 0–11 bar scale free) or on the rubber
+   guard, where the lever and your hand won't cover it.
 3. **Brew → target icon.** With the lever up, tap *Find the gauge*. Check
    that the highlighted circle is your gauge (tap another one if not). On the
    zoomed view the blue line is the needle at 0. Tap the 10 mark and save.

@@ -144,9 +144,12 @@ class GaugeSetup {
       final face = GaugeReader.faceFromMarker(c.face(w, h), m0, m);
       final rot = m.angle - m0.angle;
       fromMarker = GaugeReader.relocated(c, Relocation(face, rot, m.score), w, h, marker: m);
-      // The dial must be where the marker says. It is not when the marker
-      // sits on the machine and the gauge has moved down, or when the marker
-      // was moved: then the dial search below finds it and links it anew.
+      // A marker on the gauge moves with it: where it is, the dial is.
+      if (c.markerOnGauge(w, h)) return fromMarker;
+      // Elsewhere the dial must be where the marker says. It is not when the
+      // marker sits on the machine and the gauge has moved down, or when the
+      // marker was moved: then the dial search below finds it and links it
+      // anew.
       final check = (GaugeReader(fromMarker)..learn = false).read(f);
       if (check != null && check.tracked) {
         return GaugeReader.relocated(c, Relocation(check.face, rot, m.score), w, h, marker: m);

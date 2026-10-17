@@ -45,13 +45,21 @@ class MarkerDetector {
   static const double minR = 9, maxR = 140;
   static const double minScore = 0.7;
 
-  /// Searches the whole frame.
-  static MarkerPose? detect(LumaFrame f) {
-    final ii = _Integral.of(f, 0, 0, f.uprightWidth, f.uprightHeight);
+  /// Searches the whole frame, for all sizes or (when the size is known
+  /// from earlier frames) for radii between [rMin] and [rMax]. Big markers
+  /// are searched on a half-resolution copy, which keeps a sized search
+  /// fast enough to run on a frame where the marker was lost.
+  static MarkerPose? detect(LumaFrame f, {double rMin = minR, double rMax = maxR}) {
+    final w = f.uprightWidth, h = f.uprightHeight;
     final peaks = <(double, double, double, double)>[]; // response, x, y, r
-    for (var r = minR; r <= maxR; r *= 1.15) {
-      final step = math.max(1, (r / 8).floor());
-      _scan(ii, r, step, 0, 0, f.uprightWidth, f.uprightHeight, peaks);
+    final lo = math.max(minR, rMin), hi = math.min(maxR, rMax);
+    _Integral? full, half;
+    for (var r = lo; r <= hi * 1.0001; r *= 1.15) {
+      final ii = r >= 2 * minR
+          ? (half ??= _Integral.half(f))
+          : (full ??= _Integral.of(f, 0, 0, w, h));
+      final step = math.max(1, (r / ii.scale / 8).floor());
+      _scan(ii, r, step, peaks);
     }
     return _best(f, peaks, 40);
   }
@@ -66,38 +74,47 @@ class MarkerDetector {
     final ii = _Integral.of(f, x0, y0, x1, y1);
     final peaks = <(double, double, double, double)>[];
     for (var r = near.r * 0.75; r <= near.r * 1.25; r *= 1.06) {
-      _scan(ii, r, 1, x0, y0, x1, y1, peaks,
-          cx: near.cx, cy: near.cy, reach: 0.8 * near.r);
+      _scan(ii, r, 1, peaks, cx: near.cx, cy: near.cy, reach: 0.8 * near.r);
     }
     return _best(f, peaks, 6);
   }
 
-  /// Centre-surround response: the white ring (0.2–0.4 R) minus the dark dot.
-  static void _scan(_Integral ii, double r, int step, int x0, int y0, int x1, int y1,
+  /// Centre-surround response: the white ring (0.2–0.4 R) minus the dark
+  /// dot. The cut-off is relative to the brightness (a dim kitchen or a
+  /// grey print gives a weaker but equally clear pattern); the ranking is by
+  /// the plain difference, so the clearest targets are verified first.
+  static void _scan(_Integral ii, double rFrame, int step,
       List<(double, double, double, double)> out,
       {double? cx, double? cy, double? reach}) {
+    final k = ii.scale;
+    final r = rFrame / k;
     final a = math.max(1, (0.13 * r).round()); // inside the dot
     final b = math.max(a + 1, (0.3 * r).round()); // inside the white ring
     final lim = math.max(b, (1.3 * r).ceil());
+    final na = (2 * a + 1) * (2 * a + 1), nb = (2 * b + 1) * (2 * b + 1);
     final local = <(double, double, double, double)>[];
-    for (var y = y0 + lim; y < y1 - lim; y += step) {
-      for (var x = x0 + lim; x < x1 - lim; x += step) {
+    for (var y = ii.y0 + lim; y < ii.y0 + ii.h - lim; y += step) {
+      for (var x = ii.x0 + lim; x < ii.x0 + ii.w - lim; x += step) {
         if (reach != null) {
-          final dx = x - cx!, dy = y - cy!;
+          final dx = x * k - cx!, dy = y * k - cy!;
           if (dx * dx + dy * dy > reach * reach) continue;
         }
         final inner = ii.sum(x - a, y - a, x + a + 1, y + a + 1);
         final outer = ii.sum(x - b, y - b, x + b + 1, y + b + 1);
-        final na = (2 * a + 1) * (2 * a + 1), nb = (2 * b + 1) * (2 * b + 1);
-        final resp = (outer - inner) / (nb - na) - inner / na;
-        if (resp > 35) local.add((resp, x.toDouble(), y.toDouble(), r));
+        final ring = (outer - inner) / (nb - na), dot = inner / na;
+        final resp = ring - dot;
+        if (resp > 8 && resp > 0.15 * (ring + 10)) {
+          local.add((resp, x * k.toDouble(), y * k.toDouble(), rFrame));
+        }
       }
     }
     local.sort((p, q) => q.$1.compareTo(p.$1));
     // Keep the strongest few per size, well apart.
     final kept = <(double, double, double, double)>[];
     for (final p in local) {
-      if (kept.any((k) => (k.$2 - p.$2).abs() < r && (k.$3 - p.$3).abs() < r)) continue;
+      if (kept.any((q) => (q.$2 - p.$2).abs() < rFrame && (q.$3 - p.$3).abs() < rFrame)) {
+        continue;
+      }
       kept.add(p);
       if (kept.length >= 12) break;
     }
@@ -153,7 +170,7 @@ class MarkerDetector {
     }
     all.sort();
     final black = all[(all.length * 0.1).floor()], white = all[(all.length * 0.9).floor()];
-    if (white - black < 40) return null;
+    if (white - black < 20) return null;
     final thr = (black + white) / 2;
 
     double at(Float64List p, double rho) {
@@ -248,13 +265,14 @@ class MarkerDetector {
   }
 }
 
-/// Summed-area table of a region of the upright frame.
+/// Summed-area table of a region of the upright frame, at full or half
+/// resolution ([scale] frame pixels per table pixel).
 class _Integral {
-  _Integral(this.x0, this.y0, this.w, this.h, this.t);
+  _Integral(this.x0, this.y0, this.w, this.h, this.t, {this.scale = 1});
 
   factory _Integral.of(LumaFrame f, int x0, int y0, int x1, int y1) {
     final w = x1 - x0, h = y1 - y0;
-    final t = Int64List((w + 1) * (h + 1));
+    final t = Int32List((w + 1) * (h + 1)); // 255 × 1080 × 1920 fits
     for (var y = 0; y < h; y++) {
       var row = 0;
       for (var x = 0; x < w; x++) {
@@ -266,10 +284,28 @@ class _Integral {
     return _Integral(x0, y0, w, h, t);
   }
 
-  final int x0, y0, w, h;
-  final Int64List t;
+  /// The whole frame at half resolution (means of 2×2 pixels).
+  factory _Integral.half(LumaFrame f) {
+    final w = f.uprightWidth ~/ 2, h = f.uprightHeight ~/ 2;
+    final t = Int32List((w + 1) * (h + 1));
+    for (var y = 0; y < h; y++) {
+      var row = 0;
+      for (var x = 0; x < w; x++) {
+        final v = f.at(2 * x, 2 * y) + f.at(2 * x + 1, 2 * y) +
+            f.at(2 * x, 2 * y + 1) + f.at(2 * x + 1, 2 * y + 1);
+        row += v >> 2;
+        t[(y + 1) * (w + 1) + x + 1] = t[y * (w + 1) + x + 1] + row;
+      }
+    }
+    return _Integral(0, 0, w, h, t, scale: 2);
+  }
 
-  /// Sum over [xa, xb) × [ya, yb) in frame coordinates.
+  /// Origin and size in table pixels.
+  final int x0, y0, w, h;
+  final int scale;
+  final Int32List t;
+
+  /// Sum over [xa, xb) × [ya, yb) in table coordinates.
   int sum(int xa, int ya, int xb, int yb) {
     final ax = (xa - x0).clamp(0, w), bx = (xb - x0).clamp(0, w);
     final ay = (ya - y0).clamp(0, h), by = (yb - y0).clamp(0, h);

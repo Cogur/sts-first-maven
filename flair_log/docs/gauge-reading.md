@@ -79,17 +79,36 @@ shared from Settings → *Print a marker*.
 - **Calibration** stores the marker pose next to the face. The face/marker relation (position,
   scale, rotation) is what matters, so the marker may sit on the gauge (moves with it; best) or
   on the machine (static; the gauge moves away from it).
+- **On the gauge or not** (`GaugeCalibration.markerOnGauge`): a marker whose centre lies within
+  1.25 face radii of the face centre must be on the gauge (anything behind the gauge would be
+  hidden there). Users stick it on the glass over the logo (first real setup) or on the guard.
 - **Each frame** (`GaugeReader.read`): the marker is searched near its last pose (`detectNear`, a few
-  ms), the face is predicted from the relation, then the template tracker refines it in a small
-  range. A successful track *confirms* the relation for this session (`_relToMarker`, updated each
-  frame, so a static marker works while the gauge moves down). When the dial cannot be matched
-  (lever, hand, blur) a confirmed relation alone gives the face, and the reading continues.
+  ms). Not there (the phone was moved, or the marker covered): the whole picture is searched for a
+  marker of about the last size (`detect(rMin, rMax)` on a half-resolution integral image, ~110 ms in
+  a debug build), on every other frame while it is missing. The face is predicted from the relation:
+  - marker on the gauge: from the calibrated relation, always. The template tracker only
+    fine-tunes it (±0.12 R); if the match fails (blur, lever) the marker alone gives the face. The
+    gauge is never "lost" while the marker is seen.
+  - elsewhere: the template tracker refines it, and a successful track *confirms* the relation for
+    this session (`_relToMarker`, updated each frame, so a static marker works while the gauge
+    moves down). When the dial cannot be matched a confirmed relation alone gives the face.
+- **The marker is masked out of the needle search** (`_maskCircle`, 1.4 R): its rings are not a
+  needle. Where it was not seen in a frame, the calibrated relation says where it is.
+- **Dim light / grey print**: the first-pass response is accepted relative to the brightness
+  (`resp > 0.15 × (ring + 10)`), not as an absolute level. The real print reads ink ~100, paper
+  ~240 in good light; at a third of that contrast it is still found (test).
 - **Dial angles count from the face's tilt axis.** A marker-predicted face carries the phone's turn
   in its tilt, so `relocated()` only shifts zero, template and background by the part of the turn
   the new tilt does not already hold (`dialRot`). `Relocation.rotation` is the turn on screen.
-- **Relocation** trusts the marker only if one tracked read confirms the dial there; otherwise
-  (static marker, gauge moved; marker moved) the dial search runs and links the marker anew. A
-  marker stuck on after calibration is linked the same way at the next session start.
+- **Relocation** trusts a marker on the gauge directly. Any other marker only if one tracked read
+  confirms the dial there; otherwise (static marker, gauge moved; marker moved) the dial search
+  runs and links the marker anew. A marker stuck on after calibration is linked the same way at the
+  next session start.
+- **What the first real test showed** (a screen recording, hand-held phone): calibration worked, but
+  the phone jumped ~1.2 gauge radii within 0.2 s and the app lost the gauge for 3.6 s, because the
+  marker was only looked for near its last position and the stale face then failed the template
+  match. Fixtures `test/fixtures/marker_real_{1,2}.jpg` are two preview frames of that recording
+  (upscaled from 672 px wide), with the phone moved between them.
 - Measured: no false detections in the five machine photos; centre within 1 px, radius within 8 %,
   rotation within 1° for R = 9–45 px, rotated and blurred. Test: `test/marker_test.dart`, including
   the sheet itself rendered at 40 dpi (`test/fixtures/marker_sheet_40dpi.png`; re-render it with
@@ -100,9 +119,11 @@ shared from Settings → *Print a marker*.
 ## Diagnostic recordings (real shots)
 
 Settings → *Record camera for diagnostics*. During each shot the app writes
-`documents/diagnostics/shot_<ms>.flr` (`diagnostic_recorder.dart`): one half-resolution whole view,
-then every second frame of a fixed full-resolution region around the gauge, extended downwards (the
-gauge travels down), ≤420 frames, ~20–30 MB. It is attached to the shot export.
+`documents/diagnostics/shot_<ms>.flr` (`diagnostic_recorder.dart`) from *Tare & get ready* until the
+shot ends: every second frame of a fixed full-resolution region around the gauge, extended downwards
+(the gauge travels down), ≤420 frames, plus a half-resolution whole view at the start and about once
+a second (shows where the gauge went when the phone moved); ~25–35 MB. It is attached to the shot
+export.
 
 To reproduce a reported failure: put the file in `test/fixtures/`, load it with
 `loadRecording()` (`test/support/recording.dart`) and replay the frames through `GaugeReader`

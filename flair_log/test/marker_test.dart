@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flair_log/vision/gauge_calibration.dart';
 import 'package:flair_log/vision/gauge_reader.dart';
@@ -163,6 +164,86 @@ void main() {
       for (var i = 0; i <= 12; i++) {
         final r = reader.read(frame(i * 0.5, i * 5))!;
         expect(r.value, closeTo(i * 0.5, 0.35), reason: 'frame $i');
+      }
+    });
+  });
+
+  // Frames of the camera preview from a user's screen recording (upscaled to
+  // 1080×1920): the 16 mm marker printed on an office printer (ink reads
+  // ~100, paper ~240) and stuck on the gauge glass over the logo. Between
+  // the two frames the phone was moved (hand-held).
+  group('printed marker on the gauge glass (real frames)', () {
+    late LumaFrame real1, real2;
+    late GaugeCalibration cal;
+    late DialAnalysisData a;
+
+    setUpAll(() {
+      real1 = loadImage('test/fixtures/marker_real_1.jpg');
+      real2 = loadImage('test/fixtures/marker_real_2.jpg');
+      final an = GaugeSetup.analyse(real1, GaugeSetup.findDials(real1).first);
+      a = DialAnalysisData(an.pivotX, an.pivotY, an.face.radius, an.restAngle!);
+      cal = GaugeSetup.build(
+          frame: real1, analysis: an, zeroAngle: an.restAngle!,
+          markAngle: an.restAngle! + sweep10, markValue: 10);
+    });
+
+    test('found at calibration, and known to sit on the gauge', () {
+      final m = cal.markerIn(real1.uprightWidth, real1.uprightHeight);
+      expect(m, isNotNull);
+      expect(m!.cx, closeTo(349, 2));
+      expect(m.cy, closeTo(975, 2));
+      expect(m.r, closeTo(31, 2));
+      expect(cal.markerOnGauge(real1.uprightWidth, real1.uprightHeight), isTrue);
+    });
+
+    test('also in dim light (a third of the contrast)', () {
+      final dim = Uint8List.fromList(real1.bytes.map((v) => (v * 0.3 + 10).round()).toList());
+      final m = MarkerDetector.detect(LumaFrame(
+          bytes: dim, width: real1.width, height: real1.height, rowStride: real1.rowStride));
+      expect(m, isNotNull);
+      expect(m!.cx, closeTo(349, 2));
+    });
+
+    test('phone moved by hand: found again and reads zero', () {
+      final moved = GaugeSetup.relocate(real2, cal)!;
+      final r = GaugeReader(moved).read(real2)!;
+      expect(r.value, closeTo(0, 0.3));
+    });
+
+    test('phone jumps between frames: never lost, no re-search needed', () {
+      // The recording: the gauge jumped ~1.2 radii in 0.2 s and the app
+      // lost it for 3.6 s. The marker is now searched in the whole picture
+      // when it is not near its last place.
+      final reader = GaugeReader(cal);
+      for (final (i, f) in [
+        real1,
+        movedPhoneFrame(real1, ty: 110),
+        movedPhoneFrame(real1, deg: -4, tx: -90, ty: 60),
+        real2,
+        real1,
+      ].indexed) {
+        var r = reader.read(f);
+        // The whole-picture search runs at once, so at most one frame lags.
+        r = reader.read(f)!;
+        expect(r.tracked, isTrue, reason: 'frame $i');
+        expect(r.value, closeTo(0, 0.35), reason: 'frame $i');
+      }
+    });
+
+    test('needle sweep with the lever over the dial: the marker rings are no needle', () {
+      final reader = GaugeReader(cal);
+      final face = cal.face(real1.uprightWidth, real1.uprightHeight);
+      for (var i = 0; i <= 10; i++) {
+        final bar = i * 1.0, dy = i * 6;
+        final f = moveNeedle(real1, a.px, a.py, a.r, a.rest, a.rest + bar / 10 * sweep10);
+        final lever = i >= 3
+            // Over the right-hand rim, where the Flair lever passes.
+            ? ((face.cx + 0.7 * face.radius).round(), (face.cy - 1.6 * face.radius + dy).round(),
+                (face.cx + 1.7 * face.radius).round(), (face.cy + 0.3 * face.radius + dy).round())
+            : null;
+        final r = reader.read(shiftedFrame(f, dy, bar: lever))!;
+        expect(r.face.cy, closeTo(face.cy + dy, 3), reason: '$bar bar');
+        expect(r.value, closeTo(bar, 0.35), reason: '$bar bar');
       }
     });
   });

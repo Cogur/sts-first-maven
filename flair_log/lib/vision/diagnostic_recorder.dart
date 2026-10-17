@@ -13,11 +13,13 @@ import 'luma_frame.dart';
 /// - records: u8 type, u32 time ms since start, u16 x, u16 y, u16 w, u16 h,
 ///   u32 length, zlib-compressed greyscale pixels.
 ///   type 1: full-resolution crop at (x, y) of size w×h (the gauge region);
-///   type 2: whole frame at half resolution (x = y = 0, w×h = half size).
+///   type 2: whole frame at half resolution (x = y = 0, w×h = half size),
+///   at the start and then with every 8th kept frame (about once a second).
 ///
 /// The crop region is fixed when the shot starts: around the gauge, extended
 /// downwards because the gauge travels down with the piston. A fixed region
-/// keeps the gauge in the recording even when tracking fails.
+/// keeps the gauge in the recording even when tracking fails; the whole
+/// views show where it went when the phone itself moved.
 class DiagnosticRecorder {
   DiagnosticRecorder._(this.file, this._raf, this._x, this._y, this._w, this._h);
 
@@ -63,6 +65,9 @@ class DiagnosticRecorder {
     final keep = _skip.isEven;
     _skip++;
     if (!keep) return;
+    if (frames > 0 && frames % 8 == 0) {
+      _write(2, f, 0, 0, f.uprightWidth ~/ 2, f.uprightHeight ~/ 2, half: true);
+    }
     _write(1, f, _x, _y, _w, _h);
     frames++;
   }

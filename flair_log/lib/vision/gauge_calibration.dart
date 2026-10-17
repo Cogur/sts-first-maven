@@ -82,6 +82,19 @@ class GaugeCalibration {
     return m == null ? null : MarkerPose(m.cx * w, m.cy * h, m.r * w, m.angle, m.score);
   }
 
+  /// Whether the marker sits on the gauge itself: its centre is inside the
+  /// gauge's outline (face plus guard), where nothing behind the gauge could
+  /// be seen. It then moves with the gauge and alone tells where the dial
+  /// is. A marker elsewhere may be on the machine, which the gauge moves
+  /// away from during a shot.
+  bool markerOnGauge(int w, int h) {
+    final m = markerIn(w, h);
+    if (m == null) return false;
+    final f = face(w, h);
+    final dx = m.cx - f.cx, dy = m.cy - f.cy;
+    return dx * dx + dy * dy <= math.pow(1.25 * f.radius, 2);
+  }
+
   /// Face ellipse in pixels of a frame of the given upright size.
   DialGeometry face(int w, int h) => DialGeometry(
         cx: faceX * w,

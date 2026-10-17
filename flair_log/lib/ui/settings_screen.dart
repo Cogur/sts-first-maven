@@ -87,9 +87,10 @@ class SettingsScreen extends StatelessWidget {
                 leading: const Icon(Icons.print_outlined),
                 title: const Text('Print a marker'),
                 subtitle: const Text(
-                    'A small printed target stuck at the lower right of the gauge '
-                    'keeps the gauge found, even while the lever covers it. Share '
-                    'the sheet to a printer, Drive or e-mail; then calibrate again.'),
+                    'A small printed target stuck on the gauge (lower right, e.g. '
+                    'over the logo) keeps the gauge found, even when the phone moves '
+                    'or the lever covers it. Share the sheet to a printer, Drive or '
+                    'e-mail; then calibrate again.'),
                 onTap: () => _shareMarkerSheet(tileContext),
               ),
             ),

@@ -111,6 +111,11 @@ class GaugeReader {
 
   /// The marker in the last frame (null if none / not seen).
   MarkerPose? get marker => _marker;
+
+  // Size of the marker when last seen, and frames since: a lost marker is
+  // searched in the whole picture at about that size.
+  double? _markerR;
+  int _markerMissed = 0;
   double _lastMatch = 1;
   bool _wide = true;
   int _lostFrames = 0;
@@ -159,20 +164,45 @@ class GaugeReader {
     // it. This also covers frames where the dial itself cannot be matched
     // (lever in front of it, blur).
     DialGeometry? fromMarker;
-    final m0 = calibration.markerIn(f.uprightWidth, f.uprightHeight);
+    final w = f.uprightWidth, h = f.uprightHeight;
+    final m0 = calibration.markerIn(w, h);
+    final onGauge = calibration.markerOnGauge(w, h);
     if (m0 != null) {
-      final seen = MarkerDetector.detectNear(f, _marker ?? m0) ??
-          (_marker == null ? null : MarkerDetector.detectNear(f, m0));
+      var seen = MarkerDetector.detectNear(f, _marker ?? m0);
+      // Not near its last place (the phone was moved, or it was covered):
+      // search the whole picture for a marker of about the same size, on
+      // every other frame so a covered marker does not halve the frame rate.
+      if (seen == null && _markerMissed++ % 2 == 0) {
+        final r = _markerR ?? m0.r;
+        seen = MarkerDetector.detect(f, rMin: 0.75 * r, rMax: 1.35 * r);
+      }
+      if (seen != null) {
+        _markerMissed = 0;
+        _markerR = seen.r;
+      }
       _marker = seen;
       if (seen != null) {
-        final rel = _relToMarker ??
-            (calibration.face(f.uprightWidth, f.uprightHeight), m0);
-        fromMarker = faceFromMarker(rel.$1, rel.$2, seen);
+        // On the gauge, the calibrated relation always holds; elsewhere the
+        // one confirmed in this session (the gauge moves away from it).
+        final rel = onGauge ? null : _relToMarker;
+        fromMarker = faceFromMarker(rel?.$1 ?? calibration.face(w, h), rel?.$2 ?? m0, seen);
         face = fromMarker;
       }
     }
 
-    if (calibration.trackMovement) {
+    if (calibration.trackMovement && onGauge && fromMarker != null) {
+      // The marker is on the gauge, so it says where the dial is. The dial's
+      // appearance only fine-tunes the position; when blur or the lever
+      // spoil it, the marker alone is used.
+      final t = track(f, fromMarker, range: 0.12);
+      final ok = t != null && t.score >= (_template != null ? minMatch : 0);
+      face = ok ? t : fromMarker;
+      if (t != null) _lastMatch = t.score;
+      _prevFace = _face;
+      _face = face;
+      _wide = false;
+      _lostFrames = 0;
+    } else if (calibration.trackMovement) {
       // The gauge moves steadily with the piston: start the search where it
       // will be if it keeps its speed (limited to a third of a radius).
       final prev = _prevFace;
@@ -222,6 +252,11 @@ class GaugeReader {
     final ng = GaugeCalibration.needleGeometry(
         face, calibration.pivotDx, calibration.pivotDy);
     final polar = samplePolar(f, ng);
+    // A marker on the dial is not part of the scale: its rings must not
+    // look like a needle. Where it was not seen this frame, it is where the
+    // calibration puts it relative to the dial.
+    final mk = _marker ?? (onGauge ? _markerOnFace(face, w, h) : null);
+    if (mk != null) _maskCircle(polar, ng, mk.cx, mk.cy, 1.4 * mk.r);
     final hidden = _hiddenDirections(f, face, ng);
     NeedleHit? hit;
     final last = _lastAngle;
@@ -280,6 +315,33 @@ class GaugeReader {
   }
 
   static double _angleOf(int a) => 2 * math.pi * a / nA;
+
+  /// Marks the polar samples inside a circle as missing.
+  static void _maskCircle(Int16List polar, DialGeometry g, double cx, double cy, double rad) {
+    final c = math.cos(g.tilt), s = math.sin(g.tilt);
+    final r2 = rad * rad;
+    for (var k = 0; k < nK; k++) {
+      final rho = rho0 + (rho1 - rho0) * k / (nK - 1);
+      final ax = g.rx * rho, ay = g.ry * rho;
+      for (var a = 0; a < nA; a++) {
+        final u = ax * _cos[a], v = ay * _sin[a];
+        final dx = g.cx + u * c - v * s - cx, dy = g.cy + u * s + v * c - cy;
+        if (dx * dx + dy * dy <= r2) polar[k * nA + a] = -1;
+      }
+    }
+  }
+
+  /// Where the calibrated marker is when the dial is at [face].
+  MarkerPose? _markerOnFace(DialGeometry face, int w, int h) {
+    final m0 = calibration.markerIn(w, h);
+    if (m0 == null) return null;
+    final f0 = calibration.face(w, h);
+    final s = face.radius / f0.radius, rot = face.tilt - f0.tilt;
+    final dx = m0.cx - f0.cx, dy = m0.cy - f0.cy;
+    final c = math.cos(rot), sn = math.sin(rot);
+    return MarkerPose(face.cx + s * (dx * c - dy * sn), face.cy + s * (dx * sn + dy * c),
+        m0.r * s, m0.angle + rot, 0);
+  }
 
   // ---- needle search -------------------------------------------------------
 

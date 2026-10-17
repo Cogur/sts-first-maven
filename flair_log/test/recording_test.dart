@@ -38,6 +38,7 @@ void main() {
 
     final frames = loadRecording(file.path);
     expect(frames.first.overview, isTrue);
+    expect(frames.where((r) => r.overview).length, 3); // start + about once a second
     expect(frames.where((r) => !r.overview).length, 20); // every 2nd frame
 
     final reader = GaugeReader(cal);

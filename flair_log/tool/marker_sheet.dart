@@ -116,9 +116,9 @@ void main() {
   final steps = [
     '1. Cut one marker out along the dashed circle. Keep the white border: the',
     '    app needs it to see the edge of the black ring.',
-    '2. Stick it flat, facing the phone, at the lower right of the gauge: on the',
-    '    rubber guard or the gauge housing, so it moves down with the gauge.',
-    '    On the machine next to the gauge works too.',
+    '2. Stick it on the gauge, lower right, facing the phone: on the glass over',
+    '    the logo (keep the 0-11 bar scale free) or on the rubber guard. On the',
+    '    gauge it moves with it and the app finds the dial from the marker alone.',
     '3. It must stay in view during the whole shot: not under the lever or your',
     '    hand, and without glare (plain paper; no glossy tape over it).',
     '4. The wedge may point any way, but the marker must not move afterwards.',

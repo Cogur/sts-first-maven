@@ -10,7 +10,8 @@ class RecordedFrame {
   final int ms;
   final LumaFrame frame;
 
-  /// True for the half-resolution whole view at the start.
+  /// True for a half-resolution whole view (at the start, then about once
+  /// a second).
   final bool overview;
 }
 
