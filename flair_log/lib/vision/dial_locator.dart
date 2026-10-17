@@ -76,11 +76,14 @@ class DialLocator {
         return dist < 0.6 * math.max(o.$4, c.$4);
       });
       if (!dup) coarse.add(c);
-      if (coarse.length >= maxResults * 3) break;
+      if (coarse.length >= math.min(16, maxResults * 3)) break;
     }
 
     final refined = <DialGeometry>[];
+    final top = coarse.first.$1;
     for (final c in coarse) {
+      // Weak coarse candidates rarely become the winner; skip them.
+      if (c.$1 < 0.4 * top && refined.length >= maxResults) break;
       final g = refine(f, DialGeometry.circle(c.$2 * k, c.$3 * k, c.$4 * k));
       if (g != null && g.score >= threshold) refined.add(g);
     }
@@ -122,6 +125,36 @@ class DialLocator {
     }
     if (missing > cosT.length ~/ 5 || m == 0) return double.negativeInfinity;
     return _percentile(d, m, 0.25);
+  }
+
+  /// "Bright face all round, dark rim all round": the 20th percentile over
+  /// directions of the brightest point just inside, minus the 80th
+  /// percentile of the darkest point just outside. A bright patch *inside*
+  /// a dial, a lamp reflection or a tile corner fails one of the two halves.
+  /// This ranks candidates; it is the score [find] returns.
+  static double strictScore(LumaFrame f, DialGeometry g, {int n = 64}) =>
+      _strict(f, g, n).$1;
+
+  /// (score, face level, rim level).
+  static (double, double, double) _strict(LumaFrame f, DialGeometry g, int n) {
+    final inner = Float64List(n), outer = Float64List(n);
+    var m = 0;
+    for (var i = 0; i < n; i++) {
+      final t = 2 * math.pi * i / n;
+      int at(double rho) {
+        final p = g.point(t, rho);
+        return f.sample(p.$1, p.$2);
+      }
+
+      final a = at(0.55), b = at(0.7), c = at(0.85), o1 = at(1.1), o2 = at(1.2);
+      if (a < 0 || b < 0 || c < 0 || o1 < 0) continue;
+      inner[m] = math.max(a, math.max(b, c)).toDouble();
+      outer[m] = (o2 < 0 ? o1 : math.min(o1, o2)).toDouble();
+      m++;
+    }
+    if (m < n * 0.8) return (double.negativeInfinity, 0, 0);
+    final fl = _percentile(inner, m, 0.2), dl = _percentile(outer, m, 0.8);
+    return (fl - dl, fl, dl);
   }
 
   /// Face score of an ellipse at full resolution (also used for tracking).
@@ -199,52 +232,48 @@ class DialLocator {
 
   static DialGeometry? _refineOnce(LumaFrame f, DialGeometry rough) {
     final r0 = rough.radius;
-    final center = _houghCenter(f, rough.cx, rough.cy, r0) ?? (rough.cx, rough.cy);
-    var (cx, cy) = center;
+    // Centre candidates: where we started and the strongest votes. Things
+    // next to the gauge (a shiny stem, the lever) can pull the top vote off.
+    final centers = <(double, double)>[
+      (rough.cx, rough.cy),
+      ..._hough(f, rough.cx, rough.cy,
+          workRadius: 40, r0: r0, window: 1.7, sMin: 0.3, sMax: 1.5, searchLimit: 0.5, peaks: 3),
+    ];
 
-    // Radial profile: 75th percentile of luma over angles at each radius.
-    const na = 180;
-    final cosA = List.generate(na, (i) => math.cos(2 * math.pi * i / na));
-    final sinA = List.generate(na, (i) => math.sin(2 * math.pi * i / na));
-    final dr = math.max(1.0, r0 / 120);
-    final radii = <double>[];
-    final p75 = <double>[];
-    final ring = Float64List(na);
-    for (var rr = 0.3 * r0; rr <= 1.6 * r0; rr += dr) {
-      var m = 0;
-      for (var i = 0; i < na; i++) {
-        final v = f.sample(cx + rr * cosA[i], cy + rr * sinA[i]);
-        if (v >= 0) ring[m++] = v.toDouble();
-      }
-      if (m < na * 0.6) break;
-      radii.add(rr);
-      p75.add(_percentile(ring, m, 0.75));
-    }
-    if (radii.length < 10) return null;
-    double level(double from, double to) {
-      final v = [
-        for (var i = 0; i < radii.length; i++)
-          if (radii[i] >= from && radii[i] <= to) p75[i]
-      ];
-      return v.isEmpty ? double.nan : _median(v);
-    }
-
-    final face = level(0.35 * r0, 0.6 * r0);
-    final dark = p75.reduce(math.min);
-    if (!face.isFinite || face - dark < 25) return null;
-    final thr = (face + dark) / 2;
+    // Rim radius (and centre): the best "bright face all round, dark rim all
+    // round" contrast (see [strictScore]), with a small search around each
+    // centre candidate.
+    var bestStrict = double.negativeInfinity;
     var rf = r0;
-    for (var i = 0; i < radii.length; i++) {
-      if (radii[i] >= 0.5 * r0 && p75[i] < thr) {
-        rf = radii[i];
-        break;
+    var face = 0.0, dark = 0.0;
+    var (cx, cy) = (rough.cx, rough.cy);
+    final cStep = math.max(1.0, 0.03 * r0);
+    for (final (ox, oy) in centers) {
+      for (var sc = 0.6; sc <= 1.5; sc *= 1.025) {
+        for (final (dx, dy) in [(0.0, 0.0), (cStep, 0.0), (-cStep, 0.0), (0.0, cStep), (0.0, -cStep)]) {
+          final st = _strict(f, DialGeometry.circle(ox + dx, oy + dy, r0 * sc), 48);
+          if (st.$1 > bestStrict) {
+            bestStrict = st.$1;
+            rf = r0 * sc;
+            face = st.$2;
+            dark = st.$3;
+            (cx, cy) = (ox + dx, oy + dy);
+          }
+        }
       }
     }
+    if (!bestStrict.isFinite || face - dark < 20) return null;
+    final scanned = DialGeometry.circle(cx, cy, rf);
+    final scannedScore = strictScore(f, scanned);
 
     // Second pass with the measured rim radius: votes only from the gauge
-    // itself (rim inner and outer edge), not from cables around it.
+    // itself (rim inner and outer edge), not from cables around it. Kept
+    // only if it does not make the fit worse.
     final c2 = _houghCenter(f, cx, cy, rf, window: 1.45, searchLimit: 0.15);
-    if (c2 != null) (cx, cy) = c2;
+    if (c2 != null &&
+        strictScore(f, DialGeometry.circle(c2.$1, c2.$2, rf)) >= scannedScore - 2) {
+      (cx, cy) = c2;
+    }
 
     // Edge points: along each ray, the start of the first *long* dark run
     // (the rim). Tick marks and numerals are short runs and are skipped; a
@@ -252,7 +281,7 @@ class DialLocator {
     // which the consensus fit below outvotes.
     // Rim threshold close to the guard's darkness: grey printed bands count
     // as face, only the black guard (and very dark bands) count as rim.
-    final edgeThr = dark + 0.3 * (face - dark);
+    final edgeThr = dark + 0.35 * (face - dark);
     final pts = <(double, double)>[];
     const rays = 180;
     final stepPx = math.max(0.5, rf / 200);
@@ -337,8 +366,12 @@ class DialLocator {
         }
       }
     }
-    final score = faceScore(f, geo, n: 64);
-    if (!score.isFinite) return null;
+    // Never end up worse than the plain radius scan.
+    var score = strictScore(f, geo);
+    if (!score.isFinite || score < scannedScore - 3) {
+      geo = scanned;
+      score = scannedScore;
+    }
     return geo.moved(geo.cx, geo.cy, score: score);
   }
 
@@ -346,7 +379,7 @@ class DialLocator {
   static (double, double)? _houghCenter(LumaFrame f, double cx, double cy, double r0,
           {double window = 1.7, double searchLimit = 0.5}) {
     final p = _hough(f, cx, cy,
-          workRadius: 60,
+          workRadius: 40,
           r0: r0,
           window: window,
           sMin: 0.3,
@@ -361,15 +394,17 @@ class DialLocator {
   /// the hub. Printed logos can also look round, so the caller picks the
   /// candidate from which the needle is seen most clearly.
   static List<(double, double)> hubCandidates(
-      LumaFrame f, double cx, double cy, double r) {
+      LumaFrame f, double cx, double cy, double r,
+      {bool Function(double x, double y)? allow}) {
     if (r < 20) return const []; // hub too small to see
     return _hough(f, cx, cy,
+        allow: allow,
         workRadius: 160,
         r0: r,
-        window: 0.45,
+        window: 0.55,
         sMin: 0.025,
         sMax: 0.12,
-        searchLimit: 0.3,
+        searchLimit: 0.4,
         minPeakRatio: 2.0,
         peaks: 4);
   }
@@ -389,6 +424,7 @@ class DialLocator {
     required double searchLimit,
     double minPeakRatio = 0,
     int peaks = 1,
+    bool Function(double x, double y)? allow,
   }) {
     // Resample so that r0 spans [workRadius] pixels: bounded cost.
     final k = r0 / workRadius;
@@ -431,6 +467,7 @@ class DialLocator {
     for (var y = half - lim; y <= half + lim; y++) {
       for (var x = half - lim; x <= half + lim; x++) {
         if (x < 2 || y < 2 || x >= n - 2 || y >= n - 2) continue;
+        if (allow != null && !allow(cx + (x - half) * k, cy + (y - half) * k)) continue;
         var sum = 0.0;
         for (var j = -2; j <= 2; j++) {
           for (var i = -2; i <= 2; i++) {
@@ -569,11 +606,6 @@ class DialLocator {
     return v[(m * q).floor().clamp(0, m - 1)];
   }
 
-  static double _median(List<double> v) {
-    v.sort();
-    final m = v.length ~/ 2;
-    return v.length.isOdd ? v[m] : (v[m - 1] + v[m]) / 2;
-  }
 }
 
 /// Downscaled, upright greyscale copy for the coarse search.

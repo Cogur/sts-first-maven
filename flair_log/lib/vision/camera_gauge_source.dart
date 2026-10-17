@@ -237,10 +237,13 @@ class CameraGaugeSource extends PressureSource {
     _refinding = true;
     _lastRefind = now;
     final r = reader.calibration.face(frame.uprightWidth, frame.uprightHeight).radius;
-    GaugeSetup.findDialsInBackground(frame.copy(),
-            maxResults: 1, minRadius: 0.75 * r, maxRadius: 1.33 * r)
+    final copy = frame.copy();
+    GaugeSetup.findDialsInBackground(copy,
+            maxResults: 4, minRadius: 0.75 * r, maxRadius: 1.33 * r)
         .then((found) {
-      if (found.isNotEmpty && !_disposed) reader.reacquire(found.first);
+      // Only a dial that looks like this gauge and is near its last
+      // position counts (not the cup or the shot mirror).
+      if (!_disposed) reader.tryReacquire(copy, found);
     }).catchError((Object e) {
       debugPrint('re-find failed: $e');
     }).whenComplete(() => _refinding = false);

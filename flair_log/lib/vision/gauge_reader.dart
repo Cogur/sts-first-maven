@@ -87,6 +87,13 @@ class GaugeReader {
   bool _wide = true;
   int _lostFrames = 0;
 
+  // The needle moves continuously: at most ~12° per frame even on a hard
+  // pull. Searching near its last position first rules out look-alikes
+  // elsewhere on the dial (numerals, a screw, the lever's edge).
+  double? _lastAngle;
+  int _sinceLast = 0;
+  static const double _window = 30 * math.pi / 180;
+
   /// Consecutive frames in which the gauge could not be followed.
   int get lostFrames => _lostFrames;
 
@@ -102,6 +109,7 @@ class GaugeReader {
     _face = null;
     _wide = true;
     _lostFrames = 0;
+    _lastAngle = null;
   }
 
   /// Jump to a face position found elsewhere (e.g. by a full re-search).
@@ -139,16 +147,38 @@ class GaugeReader {
     final ng = GaugeCalibration.needleGeometry(
         face, calibration.pivotDx, calibration.pivotDy);
     final polar = samplePolar(f, ng);
-    final hit = findNeedle(polar, calibration.polarity,
-        range: calibration.searchRange, background: _bg);
-    if (hit == null) return null;
-    if (learn && tracked && hit.confidence >= learnConfidence) {
+    final hidden = _hiddenDirections(f, face, ng);
+    NeedleHit? hit;
+    final last = _lastAngle;
+    if (last != null && _sinceLast < 8) {
+      hit = findNeedle(polar, calibration.polarity,
+          range: (last - _window, last + _window), background: _bg, exclude: hidden);
+      if (hit != null && hit.confidence < minConfidence) hit = null;
+    }
+    hit ??= findNeedle(polar, calibration.polarity,
+        range: calibration.searchRange, background: _bg, exclude: hidden);
+    if (hit == null) {
+      _sinceLast++;
+      return null;
+    }
+    if (hit.confidence >= minConfidence) {
+      _lastAngle = hit.angle;
+      _sinceLast = 0;
+    } else {
+      _sinceLast++;
+    }
+    if (learn && tracked && hidden == null && hit.confidence >= learnConfidence) {
       _bg = learnBackground(_bg, polar, hit.angle);
     }
+    final value = calibration.valueForAngle(hit.angle);
+    // Far beyond the scale (the Flair gauge ends ~13 bar with "10" marked):
+    // a misread, whatever the confidence.
+    final plausible = value > calibration.minValue - 1 &&
+        value < calibration.minValue + 1.5 * (calibration.maxValue - calibration.minValue);
     return GaugeReading(
-      value: calibration.valueForAngle(hit.angle),
+      value: value,
       angle: hit.angle,
-      confidence: hit.confidence,
+      confidence: plausible ? hit.confidence : 0,
       face: face,
       needle: ng,
       tracked: tracked,
@@ -183,6 +213,7 @@ class GaugeReader {
     int polarity, {
     (double, double)? range,
     GaugeBackground? background,
+    List<bool>? exclude,
   }) {
     // Ring "face level" (75th percentile: the plain face colour even on a
     // busy dial) of this frame, and the lighting offset to the background.
@@ -250,7 +281,7 @@ class GaugeReader {
     var best = -1;
     final vals = <double>[];
     for (final a in idx) {
-      if (!sm[a].isFinite) continue;
+      if (!sm[a].isFinite || (exclude != null && exclude[a])) continue;
       vals.add(sm[a]);
       if (best < 0 || sm[a] > sm[best]) best = a;
     }
@@ -321,6 +352,76 @@ class GaugeReader {
     return math.min(p, 2 * math.pi - p);
   }
 
+  // ---- occlusion ----------------------------------------------------------
+
+  /// Directions (needle polar indices) where something covers the rim, e.g.
+  /// the lever passing in front of the gauge. The needle never reaches the
+  /// rim, so a rim that suddenly looks different from the calibrated
+  /// template means an occluder, which would otherwise pass for a needle.
+  /// Null when nothing is covered (or there is no template).
+  List<bool>? _hiddenDirections(LumaFrame f, DialGeometry face, DialGeometry ng) {
+    final raw = calibration.template;
+    if (raw == null || raw.length != _tRho.length * _tN) return null;
+    final vals = Float64List(raw.length);
+    final ok = List<bool>.filled(raw.length, false);
+    _sampleTemplate(f, face, (i, v) {
+      if (v >= 0) {
+        vals[i] = v.toDouble();
+        ok[i] = true;
+      }
+    });
+    // Brightness/contrast change since calibration: least squares v ≈ a·t + b.
+    var n = 0, st = 0.0, sv = 0.0, stt = 0.0, stv = 0.0;
+    for (var i = 0; i < raw.length; i++) {
+      if (!ok[i]) continue;
+      final t = raw[i].toDouble();
+      n++;
+      st += t;
+      sv += vals[i];
+      stt += t * t;
+      stv += t * vals[i];
+    }
+    if (n < raw.length ~/ 2) return null;
+    final den = n * stt - st * st;
+    final a = den.abs() < 1e-9 ? 1.0 : (n * stv - st * sv) / den;
+    final b = (sv - a * st) / n;
+    // Mean residual per template direction on the rim rings. Only points
+    // beyond the needle's reach *from the pivot* count: the visible face can
+    // look off-centre (seen from below, the rim hides its top), so a rim ring
+    // of the face can come within reach of the needle tip.
+    const rimRings = [4, 5, 6]; // rho 0.95, 1.05, 1.15
+    final res = Float64List(_tN);
+    for (var d = 0; d < _tN; d++) {
+      var sum = 0.0, m = 0;
+      for (final k in rimRings) {
+        final i = k * _tN + d;
+        if (!ok[i]) continue;
+        final p = face.point(2 * math.pi * d / _tN, _tRho[k]);
+        if (ng.polarOf(p.$1, p.$2).$2 < 0.97) continue;
+        sum += (vals[i] - (a * raw[i] + b)).abs();
+        m++;
+      }
+      res[d] = m == 0 ? 0 : sum / m;
+    }
+    final sorted = Float64List.fromList(res)..sort();
+    final typical = sorted[_tN ~/ 2];
+    final limit = math.max(30.0, 3 * typical);
+    final covered = [for (final r in res) r > limit];
+    if (!covered.contains(true)) return null;
+    // Map to needle directions: which template direction does the rim
+    // point of each needle direction fall into?
+    final out = List<bool>.filled(nA, false);
+    for (var i = 0; i < nA; i++) {
+      final p = ng.point(_angleOf(i), 0.95);
+      final t = face.polarOf(p.$1, p.$2).$1;
+      var d = (t / (2 * math.pi) * _tN).round() % _tN;
+      if (d < 0) d += _tN;
+      // Also the neighbours: the occluder's edge is fuzzy.
+      out[i] = covered[d] || covered[(d + 1) % _tN] || covered[(d - 1 + _tN) % _tN];
+    }
+    return out;
+  }
+
   // ---- calibration helpers -----------------------------------------------
 
   /// The needle (any direction) and its polarity, for a frame where the
@@ -336,10 +437,12 @@ class GaugeReader {
     return (dark!, 1);
   }
 
-  /// Chooses the needle pivot: the strongest hub candidate lying on the
-  /// needle line; otherwise the point of that line closest to the face
-  /// centre. (Judging candidates by needle clarity alone is ambiguous: every
-  /// point on the needle's line sees a long straight dark line.)
+  /// Chooses the needle pivot: the needle line is found first (Radon
+  /// search), then the round hub is searched only *along that line*.
+  /// Printed logos can look round too (the Flair "f" loops sit right below
+  /// the hub), but they are off the needle's line. Without a visible hub, the
+  /// point of the line closest to the face centre is used. [candidates] are
+  /// extra hub positions to consider (from a wider search).
   static (double, double) choosePivot(
       LumaFrame f, DialGeometry face, List<(double, double)> candidates) {
     final line = needleLine(f, face);
@@ -348,7 +451,10 @@ class GaugeReader {
     }
     final (px, py, ux, uy) = line;
     double perp(double x, double y) => ((x - px) * -uy + (y - py) * ux).abs();
-    final tol = math.max(1.5, 0.09 * face.radius);
+    final tol = math.max(1.5, 0.06 * face.radius);
+    final onLine = DialLocator.hubCandidates(f, face.cx, face.cy, face.radius,
+        allow: (x, y) => perp(x, y) <= tol);
+    if (onLine.isNotEmpty) return onLine.first;
     for (final c in candidates) {
       if (perp(c.$1, c.$2) <= tol) return c;
     }
@@ -439,56 +545,123 @@ class GaugeReader {
     }
   }
 
-  /// Zero-mean, unit-variance copy of a template.
+  // The template is matched per angular sector, and only the best sectors
+  // count: the lever or a hand covering part of the rim must not make the
+  // gauge "lost".
+  static const int _sectors = 9;
+  static const int _bestSectors = 6;
+  static const int _perSector = _tN ~/ _sectors; // 10 directions
+
+  static int _sectorOf(int i) => (i % _tN) ~/ _perSector;
+
+  /// Template normalised to zero mean / unit variance within each sector;
+  /// NaN marks sectors without texture (nothing to match there).
   static Float64List? normalise(Uint8List t) {
-    final n = t.length;
-    var mean = 0.0;
-    for (final v in t) {
-      mean += v;
+    if (t.length != _tRho.length * _tN) return null; // older format
+    final out = Float64List(t.length);
+    var usable = 0;
+    for (var sct = 0; sct < _sectors; sct++) {
+      var sum = 0.0, n = 0;
+      for (var i = 0; i < t.length; i++) {
+        if (_sectorOf(i) != sct) continue;
+        sum += t[i];
+        n++;
+      }
+      final mean = sum / n;
+      var ss = 0.0;
+      for (var i = 0; i < t.length; i++) {
+        if (_sectorOf(i) == sct) ss += (t[i] - mean) * (t[i] - mean);
+      }
+      final sd = math.sqrt(ss / n);
+      for (var i = 0; i < t.length; i++) {
+        if (_sectorOf(i) == sct) out[i] = sd < 2 ? double.nan : (t[i] - mean) / sd;
+      }
+      if (sd >= 2) usable++;
     }
-    mean /= n;
-    var ss = 0.0;
-    for (final v in t) {
-      ss += (v - mean) * (v - mean);
-    }
-    final sd = math.sqrt(ss / n);
-    if (sd < 1) return null;
-    return Float64List.fromList([for (final v in t) (v - mean) / sd]);
+    return usable < 3 ? null : out;
   }
 
-  /// Normalised cross-correlation of the template with the frame at [g]
-  /// (1 = identical up to brightness/contrast).
+  /// How well the frame at [g] matches the template: the mean normalised
+  /// cross-correlation of the best-matching sectors (1 = identical up to
+  /// brightness and contrast).
   static double match(LumaFrame f, DialGeometry g, Float64List tmpl) {
     final vals = Float64List(tmpl.length);
     final ok = List<bool>.filled(tmpl.length, false);
-    var sum = 0.0, n = 0;
     _sampleTemplate(f, g, (i, v) {
       if (v >= 0) {
         vals[i] = v.toDouble();
         ok[i] = true;
-        sum += v;
-        n++;
       }
     });
-    if (n < tmpl.length * 0.75) return -1;
-    final mean = sum / n;
-    var ss = 0.0, dot = 0.0;
-    for (var i = 0; i < tmpl.length; i++) {
-      if (!ok[i]) continue;
-      final d = vals[i] - mean;
-      ss += d * d;
-      dot += d * tmpl[i];
+    final scores = <double>[];
+    for (var sct = 0; sct < _sectors; sct++) {
+      var sum = 0.0, n = 0, total = 0;
+      for (var i = 0; i < tmpl.length; i++) {
+        if (_sectorOf(i) != sct || tmpl[i].isNaN) continue;
+        total++;
+        if (!ok[i]) continue;
+        sum += vals[i];
+        n++;
+      }
+      if (total == 0 || n < total * 0.8) continue;
+      final mean = sum / n;
+      var ss = 0.0, dot = 0.0;
+      for (var i = 0; i < tmpl.length; i++) {
+        if (_sectorOf(i) != sct || tmpl[i].isNaN || !ok[i]) continue;
+        final d = vals[i] - mean;
+        ss += d * d;
+        dot += d * tmpl[i];
+      }
+      scores.add(ss <= 0 ? 0 : dot / math.sqrt(ss * n));
     }
-    if (ss <= 0) return -1;
-    return dot / math.sqrt(ss * n);
+    if (scores.length < 3) return -1;
+    scores.sort((a, b) => b.compareTo(a));
+    final k = math.min(_bestSectors, scores.length);
+    return scores.take(k).reduce((a, b) => a + b) / k;
   }
 
   Float64List? _tmpl;
   Float64List? get _template =>
       _tmpl ??= calibration.template == null ? null : normalise(calibration.template!);
 
+  /// Picks the re-found dial that really is this gauge: it must match the
+  /// calibrated appearance and lie within reach of the last known position
+  /// (the gauge travels with the piston, it does not jump across the frame).
+  /// Returns true if tracking was re-acquired.
+  bool tryReacquire(LumaFrame f, List<DialGeometry> candidates) {
+    final tmpl = _template;
+    final last = _face ?? calibration.face(f.uprightWidth, f.uprightHeight);
+    final reach = 3.0 * last.radius;
+    DialGeometry? best;
+    var bestScore = reacquireMatch;
+    for (final c in candidates) {
+      final d = math.sqrt(math.pow(c.cx - last.cx, 2) + math.pow(c.cy - last.cy, 2));
+      if (d > reach) continue;
+      // Re-use the calibrated shape at the found position; then polish.
+      final g = track(f, last.moved(c.cx, c.cy)) ?? last.moved(c.cx, c.cy);
+      final sc = tmpl == null ? 1.0 : match(f, g, tmpl);
+      // A round thing that is not a gauge has no needle (shot mirror).
+      if (sc >= bestScore &&
+          (anyNeedle(f, GaugeCalibration.needleGeometry(g, calibration.pivotDx, calibration.pivotDy))
+                      ?.$1
+                      .confidence ??
+                  0) >= reacquireNeedle) {
+        bestScore = sc;
+        best = g;
+      }
+    }
+    if (best == null) return false;
+    reacquire(best);
+    return true;
+  }
+
   /// Correlation below which the gauge counts as lost.
-  static const double minMatch = 0.55;
+  static const double minMatch = 0.6;
+
+  /// Stricter bar for jumping to a re-found dial: on the real setup the
+  /// gauge matches itself at ~1.0, the shot mirror at ~0.67.
+  static const double reacquireMatch = 0.8;
+  static const double reacquireNeedle = 6;
 
   /// Follows the dial: local search for the position (and a little scale)
   /// where the calibrated appearance matches best. Returns the geometry with

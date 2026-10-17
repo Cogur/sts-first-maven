@@ -17,6 +17,7 @@ class DialAnalysis {
     required this.polarity,
     this.restAngle,
     this.restConfidence = 0,
+    this.lineAngle,
   });
 
   final DialGeometry face;
@@ -29,8 +30,22 @@ class DialAnalysis {
 
   DialGeometry get needleGeometry => face.moved(pivotX, pivotY);
 
-  bool get needleFound =>
-      restAngle != null && restConfidence >= GaugeReader.minConfidence;
+  /// Direction of the straight dark line through the dial (mod 180°), an
+  /// independent check of the needle direction.
+  final double? lineAngle;
+
+  /// Found if clearly visible, or a little less clear but confirmed by the
+  /// straight-line search (small or busy dials).
+  bool get needleFound {
+    final a = restAngle;
+    if (a == null) return false;
+    if (restConfidence >= GaugeReader.minConfidence) return true;
+    final l = lineAngle;
+    if (l == null || restConfidence < 2.5) return false;
+    var d = (a - l) % math.pi;
+    if (d < 0) d += math.pi;
+    return math.min(d, math.pi - d) < 8 * math.pi / 180;
+  }
 }
 
 // ---- background tasks -------------------------------------------------------
@@ -50,9 +65,9 @@ class FindRequest {
   final int maxResults;
 }
 
-List<DialGeometry> findDialsTask(FindRequest r) => DialLocator.find(r.frame,
-    hintX: r.tapX,
-    hintY: r.tapY,
+List<DialGeometry> findDialsTask(FindRequest r) => GaugeSetup.findDials(r.frame,
+    tapX: r.tapX,
+    tapY: r.tapY,
     minRadius: r.minRadius,
     maxRadius: r.maxRadius,
     maxResults: r.maxResults);
@@ -93,10 +108,40 @@ class GaugeSetup {
     }
   }
 
-  /// Step 1: candidate dials in the whole frame (best first). With a tap
+  /// Needle clarity that marks a candidate as a gauge rather than another
+  /// round thing (a shot mirror, a cup seen from above, a knob).
+  static const double gaugeNeedle = 6;
+
+  /// Step 1: candidate dials in the whole frame, best first: round things
+  /// with a needle before those without, then by rim contrast. With a tap
   /// position only dials around that point are considered.
-  static List<DialGeometry> findDials(LumaFrame f, {double? tapX, double? tapY}) =>
-      DialLocator.find(f, hintX: tapX, hintY: tapY);
+  static List<DialGeometry> findDials(LumaFrame f,
+      {double? tapX, double? tapY, double? minRadius, double? maxRadius, int maxResults = 4}) {
+    final found = DialLocator.find(f,
+        hintX: tapX,
+        hintY: tapY,
+        minRadius: minRadius,
+        maxRadius: maxRadius,
+        maxResults: math.max(8, maxResults));
+    // A gauge never sits inside another gauge's face: drop circles nested in
+    // a bigger candidate (bright patches between the needle and the ticks,
+    // the hub area).
+    bool nested(DialGeometry g) => found.any((h) =>
+        h.radius > 1.3 * g.radius &&
+        math.sqrt(math.pow(g.cx - h.cx, 2) + math.pow(g.cy - h.cy, 2)) + g.radius <=
+            1.15 * h.radius);
+    final ranked = [
+      for (final g in found)
+        if (!nested(g)) (g, GaugeReader.anyNeedle(f, g)?.$1.confidence ?? 0.0)
+    ];
+    ranked.sort((a, b) {
+      final na = a.$2 >= gaugeNeedle, nb = b.$2 >= gaugeNeedle;
+      if (na != nb) return na ? -1 : 1;
+      // Among gauges the clearest needle wins; otherwise the best rim.
+      return na ? b.$2.compareTo(a.$2) : b.$1.score.compareTo(a.$1.score);
+    });
+    return [for (final r in ranked.take(maxResults)) r.$1];
+  }
 
   /// Step 2: pivot, needle polarity and the needle's rest position.
   static DialAnalysis analyse(LumaFrame f, DialGeometry face) {
@@ -104,7 +149,9 @@ class GaugeSetup {
     final pivot = GaugeReader.choosePivot(f, face, hubs);
     final ng = face.moved(pivot.$1, pivot.$2);
     final hit = GaugeReader.anyNeedle(f, ng);
+    final line = GaugeReader.needleLine(f, face);
     return DialAnalysis(
+      lineAngle: line == null ? null : math.atan2(line.$4, line.$3),
       face: face,
       pivotX: pivot.$1,
       pivotY: pivot.$2,

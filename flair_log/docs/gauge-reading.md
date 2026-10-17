@@ -31,6 +31,26 @@ see wrong / missing pressure readings.
   straight dark line. Pivot = hub candidate *on* the line.
 - **Circular Hough is biased for ellipses** (normals of an ellipse miss the centre), so an ellipse fit
   is final and is validated by the face score, not by the Hough centre.
+- **Real whole-machine photos** (`test/fixtures/machine_*.jpg`, greyscale 1080 px wide, the
+  user's kitchen) showed what the synthetic dial did not:
+  - The **shot mirror** is a bright disc with a dark rim, i.e. very gauge-like, and the **cup** is round
+    too. Candidates are ranked by `strictScore` (bright face *all round*, dark rim *all round*) and
+    then by whether a needle is visible; circles nested inside a bigger candidate are dropped.
+    After losing the gauge, a re-found dial is accepted only if it matches the calibrated template
+    (≥0.8; the gauge scores ~1.0, the mirror ~0.67) **and** shows a needle (`tryReacquire`).
+  - The bright **metal stem** and the black **lever** pull the centre vote off, so refinement keeps
+    several centre candidates and never accepts a step that lowers the strict score.
+  - The **lever passes in front of the gauge**: tracking matches the template per angular sector and
+    averages the best 6 of 9; directions whose *rim* differs from the template are excluded from the
+    needle search (otherwise lever edge + needle tail read as ~10 bar). Only rim points beyond the
+    needle's reach *from the pivot* are checked, because the visible face looks off-centre (seen
+    from below) and the needle tip would otherwise count as an occluder.
+  - The **"f" logo loops** produce stronger round votes than the hub: the hub is searched only along
+    the needle line (`choosePivot`).
+  - The needle is searched first within ±30° of its last position (it moves at most ~12° per frame),
+    then on the whole scale; readings beyond 1.5× the reference mark are treated as misreads.
+  - A strongly oblique view (`machine_3.jpg`, looking up at the gauge) is not handled yet: frame
+    the gauge from the front, or tap it.
 - **Background work goes through `compute(topLevelFunction, request)`** (`GaugeSetup.findDialsInBackground`,
   `analyseInBackground`), never `Isolate.run(() => ...)` in widget code. A closure shares its captured
   context with the other closures of the same method; one holding a `ui.Image` or the `State` makes
@@ -44,6 +64,9 @@ see wrong / missing pressure readings.
 
 - `test/gauge_reader_test.dart`: synthetic Flair-like dial (`test/support/synthetic_gauge.dart`: rim,
   bands, thick tail, logo stroke, screws, optional oblique view and decoy line) and real photos.
+- `test/fixtures/machine_{1..5}.jpg`: the whole machine from the brewing position (lever up), with
+  hand-measured pivots; `moveNeedle()` / `shiftedFrame()` in `test/support/jpeg.dart` turn them into
+  a needle sweep, a gauge moving down and a lever covering the rim.
 - `test/fixtures/flair_real_{1,2,3}.pgm`: the gauge as shown by the app on a real Flair 58 (overlay
   removed), lever up. Hand-measured hub positions and the needle direction (~142°) are in the test.
   `embed()` puts them into a whole-machine sized frame.

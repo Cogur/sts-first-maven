@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flair_log/vision/dial_geometry.dart';
 import 'package:flair_log/vision/dial_locator.dart';
 import 'package:flair_log/vision/gauge_calibration.dart';
 import 'package:flair_log/vision/gauge_reader.dart';
@@ -7,6 +8,7 @@ import 'package:flair_log/vision/gauge_setup.dart';
 import 'package:flair_log/vision/luma_frame.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/jpeg.dart';
 import 'support/pgm.dart';
 import 'support/synthetic_gauge.dart';
 
@@ -203,5 +205,75 @@ void main() {
         expect(a.restAngle! / deg, closeTo(142, 5));
       });
     }
+  });
+
+  group('whole-machine photos of the real setup (lever up)', () {
+    // Pivot of the needle measured on the photos; 0 bar points lower-left.
+    const hubs = {1: (523.0, 575.0), 2: (521.0, 711.0), 4: (424.0, 668.0), 5: (636.0, 569.0)};
+    for (final i in hubs.keys) {
+      test('photo $i: finds the gauge, pivot and needle at rest', () {
+        final f = loadJpeg('test/fixtures/machine_$i.jpg');
+        final dials = GaugeSetup.findDials(f);
+        expect(dials, isNotEmpty);
+        final a = GaugeSetup.analyse(f, dials.first);
+        expect(a.pivotX, closeTo(hubs[i]!.$1, 5), reason: 'pivot x');
+        expect(a.pivotY, closeTo(hubs[i]!.$2, 5), reason: 'pivot y');
+        expect(a.needleFound, isTrue);
+        expect(a.restAngle! / deg, closeTo(141, 5));
+      });
+    }
+
+    test('photo 2: reads the needle across the scale on the real dial', () {
+      final f = loadJpeg('test/fixtures/machine_2.jpg');
+      final a = GaugeSetup.analyse(f, GaugeSetup.findDials(f).first);
+      final cal = GaugeSetup.build(
+          frame: f, analysis: a, zeroAngle: a.restAngle!,
+          markAngle: a.restAngle! + sweep10, markValue: 10);
+      final reader = GaugeReader(cal);
+      // A lever pull: the needle sweeps up in half-bar steps, then back.
+      final bars = [for (var b = 0.0; b <= 11; b += 0.5) b, for (var b = 10.5; b >= 0; b -= 1.5) b];
+      for (final bar in bars) {
+        final moved = moveNeedle(f, a.pivotX, a.pivotY, a.face.radius, a.restAngle!,
+            a.restAngle! + bar / 10 * sweep10);
+        final r = reader.read(moved)!;
+        expect(r.isValid, isTrue, reason: '$bar bar: confidence ${r.confidence}');
+        expect(r.value, closeTo(bar, 0.3), reason: '$bar bar');
+      }
+    });
+
+    test('photo 2: follows the gauge down while the lever covers part of it', () {
+      final f = loadJpeg('test/fixtures/machine_2.jpg');
+      final a = GaugeSetup.analyse(f, GaugeSetup.findDials(f).first);
+      final cal = GaugeSetup.build(
+          frame: f, analysis: a, zeroAngle: a.restAngle!,
+          markAngle: a.restAngle! + sweep10, markValue: 10);
+      final reader = GaugeReader(cal);
+      final face = cal.face(f.uprightWidth, f.uprightHeight);
+      for (var i = 0; i <= 10; i++) {
+        final dy = i * 6;
+        final bar = i >= 4
+            ? ((face.cx + 0.7 * face.radius).round(), (face.cy - 1.5 * face.radius + dy).round(),
+                (face.cx + 1.6 * face.radius).round(), (face.cy + 1.5 * face.radius + dy).round())
+            : null;
+        final r = reader.read(shiftedFrame(f, dy, bar: bar))!;
+        expect(r.tracked, isTrue, reason: 'frame $i');
+        expect(r.face.cy, closeTo(face.cy + dy, 2), reason: 'frame $i');
+        // The lever's dark edge plus the needle's tail must not read as ~10 bar.
+        expect(r.value, closeTo(0, 0.3), reason: 'frame $i');
+      }
+    });
+
+    test('photo 2: after losing the gauge, the mirror and the cup are not taken', () {
+      final f = loadJpeg('test/fixtures/machine_2.jpg');
+      final dials = GaugeSetup.findDials(f);
+      final a = GaugeSetup.analyse(f, dials.first);
+      final cal = GaugeSetup.build(
+          frame: f, analysis: a, zeroAngle: a.restAngle!,
+          markAngle: a.restAngle! + sweep10, markValue: 10);
+      const mirror = DialGeometry.circle(471.3, 887.5, 70.4);
+      const cup = DialGeometry.circle(657.7, 1191.3, 19.1);
+      expect(GaugeReader(cal).tryReacquire(f, [mirror, cup]), isFalse);
+      expect(GaugeReader(cal).tryReacquire(f, [mirror, dials.first]), isTrue);
+    });
   });
 }
