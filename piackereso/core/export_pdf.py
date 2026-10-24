@@ -1,4 +1,6 @@
-"""AI export: a PDF of up to BATCH_SIZE ads with images, built to be pasted into an AI chat.
+"""AI export: a PDF of a batch of ads with images, built to be pasted into an AI chat.
+
+The batch size is chosen in the UI (DEFAULT_BATCH, at most MAX_BATCH ads).
 
 Page 1 carries the instructions for the AI, price statistics and a one-line
 overview of every ad; then each ad follows with up to three images, its
@@ -24,7 +26,9 @@ from . import details as ad_details
 from .common import fetch, fold, format_huf, image_candidates, new_session
 from .sources import SOURCES
 
-BATCH_SIZE = 30
+DEFAULT_BATCH = 30
+# ~3 ads per page: 100 ads stay well under the 100-page PDF limit some AI chats have.
+MAX_BATCH = 100
 IMAGE_MAX_PX = 800
 IMAGE_QUALITY = 70
 FONT_DIR = Path(__file__).resolve().parent / "fonts"

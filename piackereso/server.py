@@ -68,7 +68,7 @@ class Handler(BaseHTTPRequestHandler):
             from core import export_pdf  # needs fpdf2; imported here so search works without it
         except ImportError:
             return self._json({"error": "Hiányzik az fpdf2 csomag: indítsd újra a start.bat-tal, az telepíti."}, status=500)
-        items = [it for it in data.get("items") or [] if isinstance(it, dict)][: export_pdf.BATCH_SIZE]
+        items = [it for it in data.get("items") or [] if isinstance(it, dict)][: export_pdf.MAX_BATCH]
         if not items:
             return self._json({"error": "Nincs exportálható hirdetés."}, status=400)
         prices = [p for p in data.get("prices") or [] if isinstance(p, dict)][:5000]

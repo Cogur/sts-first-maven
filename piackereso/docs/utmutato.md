@@ -80,7 +80,9 @@ A találatok fölötti **AI-export** dobozzal PDF-et készíthetsz a hirdetések
 
 ### Csomagok
 
-Egy PDF-be **30 hirdetés** kerül: `1–30`, `31–60` és így tovább, a képernyőn beállított rendezés szerint. Ha például ár szerint növekvőre rendezel, az `1–30` a 30 legolcsóbb. Ha több hirdetés kell, előbb töltsd be a „Következő oldal” gombbal.
+Egy PDF-be alapból **30 hirdetés** kerül: `1–30`, `31–60` és így tovább, a képernyőn beállított rendezés szerint. Ha például ár szerint növekvőre rendezel, az `1–30` a 30 legolcsóbb. Ha több hirdetés kell, előbb töltsd be a „Következő oldal” gombbal.
+
+A **Csomagméret** mezőben ezt 5 és 100 között bármire átállíthatod (pl. `50` → `1–50`, `51–100`); az app megjegyzi. Nagyobb csomagnál nagyobb a PDF, és tovább tart elkészíteni: 30 hirdetés jellemzően néhány MB és 10–15 oldal, 100 hirdetés akár 10–20 MB és 35–40 oldal. Ha egy AI nem fogadja el a fájlt (túl nagy), válassz kisebb csomagot.
 
 ### Mi van a PDF-ben
 
@@ -91,7 +93,7 @@ Egy PDF-be **30 hirdetés** kerül: `1–30`, `31–60` és így tovább, a kép
 
 ### Nagyobb képek + leírás
 
-Ha be van pipálva (alapból igen), az app a hirdetések saját oldaláról letölti a leírást és a nagyobb képeket. Így az AI sokkal pontosabban felismeri a típust, de 30 hirdetésnél ez **20–60 másodpercig** is tarthat. Kikapcsolva gyors, de csak a lista képei kerülnek bele.
+Ha be van pipálva (alapból igen), az app a hirdetések saját oldaláról letölti a leírást és a nagyobb képeket. Így az AI sokkal pontosabban felismeri a típust, de 30 hirdetésnél ez **20–60 másodpercig** is tarthat (nagyobb csomagnál arányosan tovább). Kikapcsolva gyors, de csak a lista képei kerülnek bele.
 
 ### Átadás az AI-nak
 

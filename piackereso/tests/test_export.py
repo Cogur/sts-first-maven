@@ -220,6 +220,16 @@ class ServerExportTests(unittest.TestCase):
             self.assertEqual(status, 500)
             self.assertIn("nincs xclip", json.loads(data)["error"])
 
+    def test_batch_size_is_capped(self):
+        many = [{**ITEMS[0], "id": str(i), "url": f"https://hardverapro.hu/apro/a{i}/friss.html"} for i in range(120)]
+        with mock.patch.object(export_pdf, "load_image", return_value=None):
+            status, headers, _ = self.post({"query": "x", "details": False, "items": many[:50], "prices": []})
+            self.assertEqual(status, 200)
+            self.assertIn("piackereso_x_1-50.pdf", headers["Content-Disposition"])
+            status, headers, _ = self.post({"query": "x", "details": False, "items": many, "prices": []})
+        self.assertEqual(status, 200)
+        self.assertIn("piackereso_x_1-100.pdf", headers["Content-Disposition"])  # MAX_BATCH
+
     def test_empty_export_is_rejected(self):
         status, _, data = self.post({"items": []})
         self.assertEqual(status, 400)

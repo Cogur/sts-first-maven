@@ -11,7 +11,7 @@ Personal meta-search over Hungarian second-hand marketplaces. User guide (Hungar
 | `core/settings.py` | `settings.local.json` (git-ignored): the optional Facebook cookie |
 | `core/common.py` | `Listing`, `SearchQuery`, `SourceResult`, HTTP session (curl_cffi if installed, else requests), `parse_price`, JSON helpers |
 | `core/details.py` | ad pages for the AI export: description + bigger images via the site's description block, JSON-LD, embedded JSON (Facebook `redacted_description`), OpenGraph; host allowlist (`ALLOWED_HOSTS`) so the server never fetches arbitrary URLs |
-| `core/export_pdf.py` | AI-export PDF (fpdf2 + bundled DejaVu Sans in `core/fonts/`, Bitstream Vera licence): instructions for the AI, price stats, overview, then each ad with ≤3 images shrunk to 800 px; `BATCH_SIZE` 30 |
+| `core/export_pdf.py` | AI-export PDF (fpdf2 + bundled DejaVu Sans in `core/fonts/`, Bitstream Vera licence): instructions for the AI, price stats, overview, then each ad with ≤3 images shrunk to 800 px; batch size chosen in the UI (`#aiSize`, 5–100, default 30, kept in `localStorage`), server caps at `MAX_BATCH` 100 |
 | `core/clipboard.py` | puts the PDF file itself on the OS clipboard: Windows PowerShell 5.1 `Set-Clipboard -LiteralPath` (via `-EncodedCommand`), macOS `osascript`, Linux `xclip` |
 | `core/sources/<site>.py` | one module per site: `KEY`, `NAME`, `search_url(q)`, `parse(...)`, `search(q)` |
 | `static/index.html` | the whole UI (no build step); saved searches and seen-ad IDs live in `localStorage` |
