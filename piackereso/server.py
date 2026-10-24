@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from core import clipboard, common, search, settings
+from core import clipboard, common, details, search, settings
 from core.common import SearchQuery
 from core.sources import SOURCES, hardverapro
 
@@ -45,7 +45,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ("/api/settings", "/api/export"):
+        if path not in ("/api/settings", "/api/export", "/api/describe"):
             return self._json({"error": "not found"}, status=404)
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -54,6 +54,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "bad json"}, status=400)
         if path == "/api/export":
             return self._export(data)
+        if path == "/api/describe":
+            return self._describe(data)
         # Only the Facebook cookie is settable; values are never echoed back.
         settings.update(
             fb_c_user=str(data.get("fb_c_user") or "").strip(),
@@ -61,6 +63,20 @@ class Handler(BaseHTTPRequestHandler):
         )
         search.clear_cache()
         return self._json({"fb_cookie_set": bool(settings.facebook_cookie())})
+
+    def _describe(self, data: dict):
+        """Ad descriptions, for checking whether the search term is in them.
+
+        Uses the same cached ad-page fetch as the AI export, so a later export
+        of these ads is faster.
+        """
+        items = [
+            {"source": str(it.get("source") or ""), "url": str(it.get("url") or "")}
+            for it in (data.get("items") or [])[:50]
+            if isinstance(it, dict)
+        ]
+        infos = details.get_many(items)
+        return self._json({"descriptions": {it["url"]: info.description for it, info in zip(items, infos)}})
 
     def _export(self, data: dict):
         """Build the AI-export PDF; send it back, or put it on the clipboard."""

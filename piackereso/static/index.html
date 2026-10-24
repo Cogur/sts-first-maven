@@ -59,7 +59,12 @@
   #aiStatus.ok { color: var(--accent); }
   #aiStatus.err { color: var(--err); }
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  #grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  #grid, #grid2 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .secondary { margin-top: 22px; border-top: 1px dashed var(--line); padding-top: 14px; }
+  .secondary .row { margin-bottom: 10px; }
+  #secInfo { margin-bottom: 12px; }
+  #grid2 .item { opacity: .85; }
+  .why { color: var(--muted); font-size: 12px; font-style: italic; }
   .item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; text-decoration: none; position: relative; }
   .item:hover { border-color: var(--accent); }
   .thumb { aspect-ratio: 4 / 3; background: var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
@@ -76,7 +81,7 @@
   .fbbox { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--card); max-width: 760px; }
   .fbbox p { margin: 6px 0; }
   @media (max-width: 520px) {
-    #grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    #grid, #grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .price { width: calc(50% - 4px); }
     .body { padding: 6px 8px 8px; }
   }
@@ -127,6 +132,7 @@
     <div class="toolbar" id="toolbar" hidden>
       <span id="summary" class="muted small"></span>
       <div class="row">
+        <label class="chip small" title="Ami a címében (vagy ellenőrzött leírásában) nem tartalmazza a keresett szavakat, a lista alján, a másodlagos találatok közé kerül."><input id="strictOnly" type="checkbox" checked> Csak pontos találatok</label>
         <button type="button" id="openAll" class="small">Összes oldal megnyitása ↗</button>
         <select id="sort" aria-label="Rendezés">
           <option value="mix">Vegyes (legújabbak elöl)</option>
@@ -152,6 +158,15 @@
     <div id="grid"></div>
     <div class="empty" id="empty">Írj be egy keresőszót, és egyszerre keresek a kiválasztott oldalakon.</div>
     <button id="more" type="button" hidden>Következő oldal betöltése</button>
+    <section class="secondary" id="secondary" hidden>
+      <div class="row">
+        <b id="secTitle">Másodlagos találatok</b>
+        <button type="button" id="secToggle" class="small">Mutasd</button>
+        <button type="button" id="checkDesc" class="small" title="Letölti ezeknek a hirdetéseknek a leírását; amelyikében szerepel a keresett kifejezés, az átkerül a pontos találatok közé.">Leírások ellenőrzése</button>
+      </div>
+      <div id="secInfo" class="small muted"></div>
+      <div id="grid2" hidden></div>
+    </section>
   </div>
 </main>
 <script>
@@ -217,6 +232,7 @@ function startSearch() {
   const q = currentQuery();
   if (!q.q) return;
   state = { query: q, page: 1, items: [], results: {}, seenBefore: null, loading: false };
+  descMsg = ""; secOpen = false;
   const seen = store.get("seen", {});
   state.seenBefore = seen[queryKey(q)] ? new Set(seen[queryKey(q)]) : null;
   const url = new URL(location);
@@ -302,32 +318,75 @@ function imgFailed(img) {
   else img.replaceWith("nincs kép");
 }
 
+// ---- relevance: is the search term in the title (or the checked description)? ----
+const descCache = {};  // ad url -> description ("" = checked, nothing usable)
+let descBusy = false, descMsg = "", secOpen = false;
+
+function fold(text) {  // lower case, no accents: "Párátlanító" -> "paratlanito" (as core.common.fold)
+  return String(text || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+function queryWords() {
+  return fold(state.query?.q).split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1);
+}
+function matchesQuery(it) {
+  const words = queryWords();
+  const text = fold(it.title + " " + (descCache[it.url] || ""));
+  return words.every((w) => text.includes(w));
+}
+function strictOn() { return $("strictOnly").checked; }
+// What the main list shows, and what the AI export uses.
+function shownItems() { return strictOn() ? sorted().filter(matchesQuery) : sorted(); }
+
+function card(it, names, secondary) {
+  const isNew = state.seenBefore && !state.seenBefore.has(it.source + ":" + it.id);
+  const priceText = it.price != null ? fmt.format(it.price) + " Ft" : (it.price_text || "ár nincs megadva");
+  const meta = [it.location, it.posted, it.extra].filter(Boolean).join(" · ");
+  return `<a class="item" href="${esc(safeUrl(it.url))}" target="_blank" rel="noopener">
+    <div class="thumb">${it.image ? `<img src="${esc(safeUrl(it.image))}" data-fb="${esc(/^https?:\/\//i.test(it.image_fallback || "") ? it.image_fallback : "")}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="imgFailed(this)">` : "nincs kép"}</div>
+    <span class="badge" style="background:${COLORS(it.source)}">${esc(names[it.source] || it.source)}</span>
+    ${isNew ? `<span class="new">ÚJ</span>` : ""}
+    <div class="body">
+      <div class="pr">${esc(priceText)}</div>
+      <div class="title">${esc(it.title)}</div>
+      ${meta ? `<div class="meta" title="${esc(meta)}">${esc(meta)}</div>` : ""}
+      ${secondary ? `<div class="why">${it.url in descCache ? "a leírásában sincs benne" : "a címében nincs benne"}</div>` : ""}
+    </div></a>`;
+}
+
+function renderSecondary(list, names) {
+  $("secondary").hidden = list.length === 0;
+  if (!list.length) return;
+  const unchecked = list.filter((it) => !(it.url in descCache)).length;
+  $("secTitle").textContent = `Másodlagos találatok (${list.length})`;
+  $("secToggle").textContent = secOpen ? "Elrejtés" : "Mutasd";
+  $("checkDesc").hidden = unchecked === 0 && !descBusy;
+  $("checkDesc").disabled = descBusy;
+  $("secInfo").textContent = descMsg || (unchecked
+    ? `A címükben nincs benne a keresett kifejezés. ${unchecked} hirdetés leírása még nincs ellenőrizve.`
+    : "Se a címükben, se a leírásukban nincs benne a keresett kifejezés.");
+  $("grid2").hidden = !secOpen;
+  if (secOpen) $("grid2").innerHTML = list.map((it) => card(it, names, true)).join("");
+}
+
 function render() {
-  const items = sorted();
+  const all = sorted();
+  const items = strictOn() ? all.filter(matchesQuery) : all;
+  const secondaryItems = strictOn() ? all.filter((it) => !matchesQuery(it)) : [];
   const names = Object.fromEntries(SOURCES.map((s) => [s.key, s.name]));
-  $("grid").innerHTML = items.map((it) => {
-    const isNew = state.seenBefore && !state.seenBefore.has(it.source + ":" + it.id);
-    const priceText = it.price != null ? fmt.format(it.price) + " Ft" : (it.price_text || "ár nincs megadva");
-    const meta = [it.location, it.posted, it.extra].filter(Boolean).join(" · ");
-    return `<a class="item" href="${esc(safeUrl(it.url))}" target="_blank" rel="noopener">
-      <div class="thumb">${it.image ? `<img src="${esc(safeUrl(it.image))}" data-fb="${esc(/^https?:\/\//i.test(it.image_fallback || "") ? it.image_fallback : "")}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="imgFailed(this)">` : "nincs kép"}</div>
-      <span class="badge" style="background:${COLORS(it.source)}">${esc(names[it.source] || it.source)}</span>
-      ${isNew ? `<span class="new">ÚJ</span>` : ""}
-      <div class="body">
-        <div class="pr">${esc(priceText)}</div>
-        <div class="title">${esc(it.title)}</div>
-        ${meta ? `<div class="meta" title="${esc(meta)}">${esc(meta)}</div>` : ""}
-      </div></a>`;
-  }).join("");
+  $("grid").innerHTML = items.map((it) => card(it, names, false)).join("");
+  renderSecondary(secondaryItems, names);
   const fetched = Object.values(state.results).filter((r) => !r.link_only);
   const anyResults = Object.keys(state.results).length > 0;
   $("toolbar").hidden = !anyResults;
   $("empty").hidden = items.length > 0 || !anyResults && !state.loading;
   if (anyResults && !items.length) {
-    $("empty").textContent = fetched.length ? "Nincs találat a lekérhető oldalakon. A fenti „Megnyitás” linkekkel közvetlenül is megnézheted." : "Nyisd meg a fenti linket a találatokhoz.";
+    $("empty").textContent = secondaryItems.length
+      ? "Egyik hirdetés címében sincs benne a keresett kifejezés. Lent, a másodlagos találatoknál nézheted meg őket, vagy ellenőriztetheted a leírásukat."
+      : fetched.length ? "Nincs találat a lekérhető oldalakon. A fenti „Megnyitás” linkekkel közvetlenül is megnézheted." : "Nyisd meg a fenti linket a találatokhoz.";
   }
   const newCount = state.seenBefore ? items.filter((it) => !state.seenBefore.has(it.source + ":" + it.id)).length : 0;
-  $("summary").textContent = `${items.length} hirdetés` + (newCount ? ` · ${newCount} új a legutóbbi keresés óta` : "");
+  $("summary").textContent = `${items.length} hirdetés` + (secondaryItems.length ? ` · ${secondaryItems.length} másodlagos` : "")
+    + (newCount ? ` · ${newCount} új a legutóbbi keresés óta` : "");
   $("more").hidden = !fetched.some((r) => r.hasMore && !r.error);
   renderExport(items.length);
 }
@@ -367,7 +426,7 @@ function aiStatus(text, kind = "") {
 
 async function exportBatch(b, clip) {
   if (exportBusy) return;
-  const all = sorted();
+  const all = shownItems();
   const BATCH = batchSize();
   const items = all.slice(b * BATCH, (b + 1) * BATCH).map(({ source, id, title, url, price, price_text, location, posted, image, image_fallback, extra }) =>
     ({ source, id, title, url, price, price_text, location, posted, image, image_fallback, extra }));
@@ -398,7 +457,7 @@ async function exportBatch(b, clip) {
   } catch (e) {
     aiStatus("Hiba: " + e.message, "err");
   } finally {
-    exportBusy = false; renderExport(sorted().length);
+    exportBusy = false; renderExport(shownItems().length);
   }
 }
 
@@ -407,7 +466,7 @@ $("aiSize").value = store.get("aiSize", BATCH_DEFAULT);
 // not rebuild the buttons under the pointer (that would swallow the click).
 $("aiSize").addEventListener("input", () => {
   store.set("aiSize", batchSize());
-  renderExport(sorted().length);
+  renderExport(shownItems().length);
 });
 $("aiSize").addEventListener("change", () => {
   $("aiSize").value = batchSize();  // show the clamped value
@@ -446,6 +505,44 @@ $("saved").addEventListener("click", (e) => {
     startSearch();
   }
 });
+
+async function checkDescriptions() {
+  if (descBusy) return;
+  const todo = sorted().filter((it) => !matchesQuery(it) && !(it.url in descCache));
+  if (!todo.length) return;
+  descBusy = true;
+  let done = 0, promoted = 0;
+  try {
+    for (let i = 0; i < todo.length; i += 10) {  // in chunks, so progress shows and matches move up as they come
+      const chunk = todo.slice(i, i + 10);
+      descMsg = `Leírások ellenőrzése… ${done}/${todo.length} (hirdetésenként néhány másodperc is lehet)`;
+      render();
+      const resp = await fetch("/api/describe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: chunk.map(({ source, url }) => ({ source, url })) }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "ismeretlen hiba");
+      for (const it of chunk) {
+        descCache[it.url] = data.descriptions?.[it.url] || "";
+        if (matchesQuery(it)) promoted++;
+      }
+      done += chunk.length;
+    }
+    descMsg = `✓ ${todo.length} leírás ellenőrizve: ${promoted} hirdetés leírásában megvan a kifejezés, ezek átkerültek a pontos találatok közé.`;
+  } catch (e) {
+    descMsg = "Hiba a leírások ellenőrzésekor: " + e.message;
+  } finally {
+    descBusy = false;
+    render();
+  }
+}
+
+$("strictOnly").checked = store.get("strictOnly", true);
+$("strictOnly").addEventListener("change", () => { store.set("strictOnly", strictOn()); render(); });
+$("secToggle").addEventListener("click", () => { secOpen = !secOpen; render(); });
+$("checkDesc").addEventListener("click", checkDescriptions);
 
 init();
 </script>

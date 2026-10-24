@@ -42,6 +42,18 @@ _DESCRIPTION_SELECTORS = (
 )
 
 
+# Share-button labels that end up inside some description blocks (Hardverapró).
+_SHARE_LINES = {
+    "megosztás", "facebook", "linkedin", "reddit", "microsoft teams", "telegram", "tumblr",
+    "x / twitter", "twitter", "viber", "messenger", "whatsapp", "pinterest", "e-mail", "email", "link másolása",
+}
+
+
+def _without_share_buttons(text: str) -> str:
+    lines = [line for line in text.split("\n") if line.strip().lower() not in _SHARE_LINES]
+    return "\n".join(lines).strip()
+
+
 @dataclass
 class Details:
     description: str = ""
@@ -96,6 +108,7 @@ def extract(html: str, page_url: str) -> Details:
                     if isinstance(candidate, str):
                         images.append(candidate)
 
+    texts = [_without_share_buttons(t) for t in texts]
     description = preferred or max((t for t in texts if _usable_description(t)), key=len, default="")
     if not description:  # 3. the short OpenGraph summary
         description = next((clean_block(t) for t in _meta(soup, "og:description") + _meta(soup, "description") if _usable_description(t)), "")

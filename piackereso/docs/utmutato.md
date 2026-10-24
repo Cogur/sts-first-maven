@@ -64,6 +64,10 @@ Az indítás után az app a háttérben „belátogat” a Hardverapróra (lásd
 **A lista:**
 - **Rendezés** (jobbra fent): vegyes (minden oldal legújabbjai felváltva), ár szerint növekvő vagy csökkenő, illetve forrás szerint.
 - **Következő oldal betöltése** (a lista alján): további találatok.
+- **Csak pontos találatok** (kapcsoló a lista fölött, alapból bekapcsolva): az oldalak keresői gyakran olyan hirdetéseket is visszaadnak, amelyekben a keresett kifejezés nem is szerepel (pl. a Vinted „párátlanító”-ra lengyel légtisztítókat és mosógépet is hoz). Ilyenkor a főlistában csak azok maradnak, amelyek **címében** benne van a keresés minden szava; a többi a lista alján, a **Másodlagos találatok** részbe kerül (összecsukva, a **Mutasd** gombbal nyílik).
+  - **Leírások ellenőrzése:** letölti a másodlagos hirdetések leírását, és amelyikében szerepel a kifejezés, azt visszateszi a főlistába. Hirdetésenként pár másodperc, ezért csak gombnyomásra fut. A letöltött leírásokat a PDF-készítés is újrahasználja.
+  - Az egyezés kis- és nagybetű-, illetve ékezetfüggetlen, és a toldalékos alakot is megtalálja („párátlanítót”, „Parátlanitó”), a szinonimákat viszont nem: a „páramentesítő” nem számít egyezésnek, ha „párátlanító”-ra kerestél.
+  - Kikapcsolva minden hirdetés egy listában látszik, mint régen. Az app megjegyzi a beállítást.
 - **ÚJ** címke: ha egy keresést korábban már lefuttattál, az azóta megjelent hirdetések kapják.
 - A hirdetésre kattintva az eredeti oldalon nyílik meg.
 
@@ -80,7 +84,7 @@ A találatok fölötti **AI-export** dobozzal PDF-et készíthetsz a hirdetések
 
 ### Csomagok
 
-Egy PDF-be alapból **30 hirdetés** kerül: `1–30`, `31–60` és így tovább, a képernyőn beállított rendezés szerint. Ha például ár szerint növekvőre rendezel, az `1–30` a 30 legolcsóbb. Ha több hirdetés kell, előbb töltsd be a „Következő oldal” gombbal.
+Egy PDF-be alapból **30 hirdetés** kerül: `1–30`, `31–60` és így tovább, a képernyőn beállított rendezés szerint. Ha be van kapcsolva a **Csak pontos találatok**, csak a főlista hirdetései kerülnek a PDF-be, a másodlagosak nem. Ha például ár szerint növekvőre rendezel, az `1–30` a 30 legolcsóbb. Ha több hirdetés kell, előbb töltsd be a „Következő oldal” gombbal.
 
 A **Csomagméret** mezőben ezt 5 és 100 között bármire átállíthatod (pl. `50` → `1–50`, `51–100`); az app megjegyzi. Nagyobb csomagnál nagyobb a PDF, és tovább tart elkészíteni: 30 hirdetés jellemzően néhány MB és 10–15 oldal, 100 hirdetés akár 10–20 MB és 35–40 oldal. Ha egy AI nem fogadja el a fájlt (túl nagy), válassz kisebb csomagot.
 

@@ -6,7 +6,7 @@ Personal meta-search over Hungarian second-hand marketplaces. User guide (Hungar
 
 | Path | What |
 |---|---|
-| `server.py` | stdlib `ThreadingHTTPServer`: serves `static/` and `GET /api/search?q=&min=&max=&page=&sources=a,b&city=`, `GET /api/sources`, `GET`/`POST /api/settings`, `POST /api/export` (PDF bytes, or `{"clipboard": true}` → file on the clipboard; copies kept in `exports/`) |
+| `server.py` | stdlib `ThreadingHTTPServer`: serves `static/` and `GET /api/search?q=&min=&max=&page=&sources=a,b&city=`, `GET /api/sources`, `GET`/`POST /api/settings`, `POST /api/describe` (`{items:[{source,url}]}` ≤50 → `{descriptions:{url: text}}`, via the cached `details.get_many`), `POST /api/export` (PDF bytes, or `{"clipboard": true}` → file on the clipboard; copies kept in `exports/`) |
 | `core/search.py` | runs sources in parallel, re-applies the price filter, 2-minute cache, turns exceptions into a per-source `error` |
 | `core/settings.py` | `settings.local.json` (git-ignored): the optional Facebook cookie |
 | `core/common.py` | `Listing`, `SearchQuery`, `SourceResult`, HTTP session (curl_cffi if installed, else requests), `parse_price`, JSON helpers |
@@ -14,7 +14,7 @@ Personal meta-search over Hungarian second-hand marketplaces. User guide (Hungar
 | `core/export_pdf.py` | AI-export PDF (fpdf2 + bundled DejaVu Sans in `core/fonts/`, Bitstream Vera licence): instructions for the AI, price stats, overview, then each ad with ≤3 images shrunk to 800 px; batch size chosen in the UI (`#aiSize`, 5–100, default 30, kept in `localStorage`), server caps at `MAX_BATCH` 100 |
 | `core/clipboard.py` | puts the PDF file itself on the OS clipboard: Windows PowerShell 5.1 `Set-Clipboard -LiteralPath` (via `-EncodedCommand`), macOS `osascript`, Linux `xclip` |
 | `core/sources/<site>.py` | one module per site: `KEY`, `NAME`, `search_url(q)`, `parse(...)`, `search(q)` |
-| `static/index.html` | the whole UI (no build step); saved searches and seen-ad IDs live in `localStorage` |
+| `static/index.html` | the whole UI (no build step); saved searches and seen-ad IDs live in `localStorage`. Relevance: with "Csak pontos találatok" (`#strictOnly`, default on) only ads whose title (or description checked via `POST /api/describe`) contains every query word (`fold`, accent/case-insensitive substring) stay in the main list and the AI export; the rest go to "Másodlagos találatok" |
 | `tools/diag_hardverapro.py` | run on the user's machine (`diag.bat`): tries request variants against Hardverapró, report in `debug/` |
 | `tests/test_parsers.py` | parser tests on trimmed site markup; `python -m unittest discover -s tests` |
 

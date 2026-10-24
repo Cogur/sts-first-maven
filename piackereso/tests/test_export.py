@@ -63,6 +63,15 @@ class ExtractTests(unittest.TestCase):
         self.assertEqual(d.description, "Philips 3200 LatteGo, 1 éves, garanciális.")
         self.assertEqual(d.images, ["https://scontent.xx.fbcdn.net/main.jpg"])
 
+    def test_share_buttons_are_not_part_of_the_description(self):
+        html = """<div class="uad-content"><div class="rtif-content">Fisher F-DRY202AE4-I párátlanító, újszerű.<br>
+        Teljesítmény 440W</div><div>Megosztás</div></div>"""
+        html = html.replace("</div></div>", "</div>Megosztás<br>Facebook<br>LinkedIn<br>X / Twitter<br>Viber</div>")
+        d = details.extract(html, "https://hardverapro.hu/apro/fisher/friss.html")
+        self.assertIn("Teljesítmény 440W", d.description)
+        for junk in ("Megosztás", "LinkedIn", "Viber", "Twitter"):
+            self.assertNotIn(junk, d.description)
+
     def test_long_description_is_cut(self):
         html = '<div class="description">' + "szó " * 1000 + "</div>"
         d = details.extract(html, "https://www.jofogas.hu/a_150123456.htm")
@@ -229,6 +238,17 @@ class ServerExportTests(unittest.TestCase):
             status, headers, _ = self.post({"query": "x", "details": False, "items": many, "prices": []})
         self.assertEqual(status, 200)
         self.assertIn("piackereso_x_1-100.pdf", headers["Content-Disposition"])  # MAX_BATCH
+
+    def test_describe_returns_descriptions_by_url(self):
+        infos = [details.Details("Kiváló párátlanító."), details.Details()]
+        with mock.patch.object(self.server_mod.details, "get_many", return_value=infos) as get_many:
+            req = urllib.request.Request(self.base + "/api/describe", headers={"Content-Type": "application/json"},
+                                         data=json.dumps({"items": [{"source": "vinted", "url": "https://www.vinted.hu/items/1"},
+                                                                    {"source": "jofogas", "url": "https://www.jofogas.hu/a_150000002.htm"}]}).encode())
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req) as resp:
+                data = json.loads(resp.read())
+        self.assertEqual(data["descriptions"], {"https://www.vinted.hu/items/1": "Kiváló párátlanító.", "https://www.jofogas.hu/a_150000002.htm": ""})
+        self.assertEqual(get_many.call_args.args[0][0], {"source": "vinted", "url": "https://www.vinted.hu/items/1"})
 
     def test_empty_export_is_rejected(self):
         status, _, data = self.post({"items": []})
