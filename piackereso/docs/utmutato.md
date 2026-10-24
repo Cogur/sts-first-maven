@@ -65,7 +65,8 @@ Az indítás után az app a háttérben „belátogat” a Hardverapróra (lásd
 - **Rendezés** (jobbra fent): vegyes (minden oldal legújabbjai felváltva), ár szerint növekvő vagy csökkenő, illetve forrás szerint.
 - **Következő oldal betöltése** (a lista alján): további találatok.
 - **Csak pontos találatok** (kapcsoló a lista fölött, alapból bekapcsolva): az oldalak keresői gyakran olyan hirdetéseket is visszaadnak, amelyekben a keresett kifejezés nem is szerepel (pl. a Vinted „párátlanító”-ra lengyel légtisztítókat és mosógépet is hoz). Ilyenkor a főlistában csak azok maradnak, amelyek **címében** benne van a keresés minden szava; a többi a lista alján, a **Másodlagos találatok** részbe kerül (összecsukva, a **Mutasd** gombbal nyílik).
-  - **Leírások ellenőrzése:** letölti a másodlagos hirdetések leírását, és amelyikében szerepel a kifejezés, azt visszateszi a főlistába. Hirdetésenként pár másodperc, ezért csak gombnyomásra fut. A letöltött leírásokat a PDF-készítés is újrahasználja.
+  - **Leírásban is keressen** (kapcsoló, alapból bekapcsolva): minden keresés és „Következő oldal” után az app magától letölti a másodlagos hirdetések leírását, és amelyikében szerepel a kifejezés, azt visszateszi a főlistába. Hirdetésenként pár másodperc, a haladás a lista fölött látszik („leírások ellenőrzése: 10/40”), közben a lista már használható. A letöltött leírásokat a PDF-készítés is újrahasználja, így az is gyorsabb lesz.
+  - Ha ezt kikapcsolod, a másodlagos résznél a **Leírások ellenőrzése** gombbal kézzel indíthatod.
   - Az egyezés kis- és nagybetű-, illetve ékezetfüggetlen, és a toldalékos alakot is megtalálja („párátlanítót”, „Parátlanitó”), a szinonimákat viszont nem: a „páramentesítő” nem számít egyezésnek, ha „párátlanító”-ra kerestél.
   - Kikapcsolva minden hirdetés egy listában látszik, mint régen. Az app megjegyzi a beállítást.
 - **ÚJ** címke: ha egy keresést korábban már lefuttattál, az azóta megjelent hirdetések kapják.

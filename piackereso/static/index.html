@@ -133,6 +133,7 @@
       <span id="summary" class="muted small"></span>
       <div class="row">
         <label class="chip small" title="Ami a címében (vagy ellenőrzött leírásában) nem tartalmazza a keresett szavakat, a lista alján, a másodlagos találatok közé kerül."><input id="strictOnly" type="checkbox" checked> Csak pontos találatok</label>
+        <label class="chip small" title="Keresés után a másodlagos hirdetések leírását is letölti; amelyikében szerepel a kifejezés, az a főlistába kerül. Hirdetésenként pár másodperc."><input id="descAuto" type="checkbox" checked> Leírásban is keressen</label>
         <button type="button" id="openAll" class="small">Összes oldal megnyitása ↗</button>
         <select id="sort" aria-label="Rendezés">
           <option value="mix">Vegyes (legújabbak elöl)</option>
@@ -269,6 +270,7 @@ async function runSearch(page) {
     state.loading = false;
     $("go").disabled = false; $("more").disabled = false; $("go").textContent = "Keresés";
     renderStatus(false); render();
+    if (strictOn() && $("descAuto").checked) checkDescriptions();
   }
 }
 
@@ -320,7 +322,7 @@ function imgFailed(img) {
 
 // ---- relevance: is the search term in the title (or the checked description)? ----
 const descCache = {};  // ad url -> description ("" = checked, nothing usable)
-let descBusy = false, descMsg = "", secOpen = false;
+let descBusy = false, descMsg = "", descProgress = "", secOpen = false;
 
 function fold(text) {  // lower case, no accents: "Párátlanító" -> "paratlanito" (as core.common.fold)
   return String(text || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
@@ -386,7 +388,9 @@ function render() {
   }
   const newCount = state.seenBefore ? items.filter((it) => !state.seenBefore.has(it.source + ":" + it.id)).length : 0;
   $("summary").textContent = `${items.length} hirdetés` + (secondaryItems.length ? ` · ${secondaryItems.length} másodlagos` : "")
+    + (descProgress ? ` · ${descProgress}` : "")
     + (newCount ? ` · ${newCount} új a legutóbbi keresés óta` : "");
+  $("descAuto").disabled = !strictOn();
   $("more").hidden = !fetched.some((r) => r.hasMore && !r.error);
   renderExport(items.length);
 }
@@ -506,16 +510,21 @@ $("saved").addEventListener("click", (e) => {
   }
 });
 
+let descAgain = false;
+
 async function checkDescriptions() {
-  if (descBusy) return;
+  if (descBusy) { descAgain = true; return; }  // a new search / page arrived meanwhile: run once more after
+  const query = state.query;
   const todo = sorted().filter((it) => !matchesQuery(it) && !(it.url in descCache));
   if (!todo.length) return;
   descBusy = true;
   let done = 0, promoted = 0;
   try {
     for (let i = 0; i < todo.length; i += 10) {  // in chunks, so progress shows and matches move up as they come
+      if (state.query !== query) break;  // the user started another search
       const chunk = todo.slice(i, i + 10);
       descMsg = `Leírások ellenőrzése… ${done}/${todo.length} (hirdetésenként néhány másodperc is lehet)`;
+      descProgress = `leírások ellenőrzése: ${done}/${todo.length}`;
       render();
       const resp = await fetch("/api/describe", {
         method: "POST",
@@ -530,19 +539,32 @@ async function checkDescriptions() {
       }
       done += chunk.length;
     }
-    descMsg = `✓ ${todo.length} leírás ellenőrizve: ${promoted} hirdetés leírásában megvan a kifejezés, ezek átkerültek a pontos találatok közé.`;
+    if (state.query === query) {
+      descMsg = `✓ ${done} leírás ellenőrizve: ${promoted} hirdetés leírásában megvan a kifejezés, ezek átkerültek a pontos találatok közé.`;
+    }
   } catch (e) {
     descMsg = "Hiba a leírások ellenőrzésekor: " + e.message;
   } finally {
     descBusy = false;
+    descProgress = "";
     render();
+    if (descAgain) { descAgain = false; if (strictOn() && $("descAuto").checked) checkDescriptions(); }
   }
 }
 
 $("strictOnly").checked = store.get("strictOnly", true);
-$("strictOnly").addEventListener("change", () => { store.set("strictOnly", strictOn()); render(); });
+$("strictOnly").addEventListener("change", () => {
+  store.set("strictOnly", strictOn());
+  render();
+  if (strictOn() && $("descAuto").checked) checkDescriptions();
+});
 $("secToggle").addEventListener("click", () => { secOpen = !secOpen; render(); });
 $("checkDesc").addEventListener("click", checkDescriptions);
+$("descAuto").checked = store.get("descAuto", true);
+$("descAuto").addEventListener("change", () => {
+  store.set("descAuto", $("descAuto").checked);
+  if ($("descAuto").checked && strictOn()) checkDescriptions();
+});
 
 init();
 </script>
