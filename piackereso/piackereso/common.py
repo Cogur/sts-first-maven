@@ -1,0 +1,161 @@
+"""Shared types and helpers for every marketplace source."""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import asdict, dataclass, field
+from typing import Any, Iterable, Iterator
+
+try:  # curl_cffi mimics a real Chrome TLS handshake; sites with bot protection prefer it.
+    from curl_cffi import requests as _http
+
+    _IMPERSONATE = {"impersonate": "chrome"}
+except ImportError:  # plain requests works for most sites
+    import requests as _http
+
+    _IMPERSONATE = {}
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+)
+TIMEOUT = 15
+
+
+@dataclass
+class Listing:
+    source: str
+    id: str
+    title: str
+    url: str
+    price: int | None = None  # whole forints; None when the ad has no usable price
+    price_text: str = ""
+    location: str = ""
+    posted: str = ""
+    image: str = ""
+    extra: str = ""  # e.g. brand / size on Vinted
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SearchQuery:
+    text: str
+    min_price: int | None = None
+    max_price: int | None = None
+    page: int = 1
+    fb_city: str = "budapest"
+
+
+@dataclass
+class SourceResult:
+    source: str
+    name: str
+    search_url: str  # the same search on the site itself, always shown to the user
+    listings: list[Listing] = field(default_factory=list)
+    error: str = ""
+    link_only: bool = False  # True when the source cannot be fetched (Facebook)
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["count"] = len(self.listings)
+        return d
+
+
+def new_session():
+    s = _http.Session(**_IMPERSONATE)
+    s.headers.update(
+        {
+            "User-Agent": USER_AGENT,
+            "Accept-Language": "hu-HU,hu;q=0.9,en;q=0.8",
+            "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+        }
+    )
+    return s
+
+
+def fetch(session, url: str, **kwargs) -> Any:
+    resp = session.get(url, timeout=TIMEOUT, **kwargs)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"HTTP {resp.status_code} ({url})")
+    return resp
+
+
+_DIGITS = re.compile(r"\d")
+
+
+def parse_price(text: Any) -> int | None:
+    """'85 000 Ft' -> 85000, '12.500,- Ft' -> 12500, '1 299,99' -> 1299, 'Ingyenes' -> 0."""
+    if text is None:
+        return None
+    if isinstance(text, (int, float)):
+        return int(text)
+    s = str(text).strip()
+    if not s:
+        return None
+    if re.search(r"ingyen|free", s, re.I):
+        return 0
+    # Drop a decimal part such as ",99" or ".00" at the end of the number.
+    s = re.sub(r"[.,]\d{1,2}(?!\d)", "", s)
+    digits = "".join(_DIGITS.findall(s))
+    return int(digits) if digits else None
+
+
+def format_huf(price: int | None) -> str:
+    return "" if price is None else f"{price:,} Ft".replace(",", " ")
+
+
+def clean(text: Any) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def in_price_range(listing: Listing, q: SearchQuery) -> bool:
+    if listing.price is None:
+        return True  # keep "price on request" ads; the user can judge them
+    if q.min_price is not None and listing.price < q.min_price:
+        return False
+    if q.max_price is not None and listing.price > q.max_price:
+        return False
+    return True
+
+
+def iter_json_ld(soup) -> Iterator[Any]:
+    for tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            yield json.loads(tag.string or tag.get_text() or "")
+        except (ValueError, TypeError):
+            continue
+
+
+def walk_json(node: Any) -> Iterator[dict]:
+    """Yield every dict inside a JSON tree (depth-first)."""
+    stack = [node]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, dict):
+            yield cur
+            stack.extend(cur.values())
+        elif isinstance(cur, list):
+            stack.extend(cur)
+
+
+def first(d: dict, keys: Iterable[str]) -> Any:
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, "", [], {}):
+            return v
+    return None
+
+
+def dedupe(listings: Iterable[Listing]) -> list[Listing]:
+    seen: set[str] = set()
+    out = []
+    for item in listings:
+        key = item.url or item.id
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out

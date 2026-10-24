@@ -1,0 +1,4 @@
+requests>=2.31
+beautifulsoup4>=4.12
+# Optional but recommended: looks like Chrome to the sites' bot protection (Vinted especially).
+curl_cffi>=0.7

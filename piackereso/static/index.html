@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piackereső</title>
+<meta name="theme-color" content="#0f766e">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%8D%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #16181d; --muted: #646b78; --line: #e2e5ea;
+    --accent: #0f766e; --accent-fg: #fff; --new: #c2410c; --err: #b91c1c;
+    --hardverapro: #1d4ed8; --jofogas: #c2410c; --vinted: #0e7c86; --facebook: #1877f2; --badge-fg: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111317; --card: #1b1e24; --text: #e8eaee; --muted: #9aa1ad; --line: #2c3038;
+      --accent: #2dd4bf; --accent-fg: #062b27; --new: #fb923c; --err: #f87171;
+      --hardverapro: #60a5fa; --jofogas: #fb923c; --vinted: #2dd4bf; --facebook: #60a5fa; --badge-fg: #111317;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: inherit; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 12px 16px; }
+  h1 { font-size: 18px; margin: 0 0 8px; letter-spacing: -.01em; }
+  form { display: grid; gap: 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, select, button { font: inherit; color: inherit; }
+  input[type=search], input[type=text], input[type=number], select {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0;
+  }
+  #q { flex: 1 1 260px; font-size: 16px; }
+  .price { width: 110px; }
+  button { cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--card); padding: 8px 12px; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .55; cursor: default; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; background: var(--card); font-size: 14px; user-select: none; cursor: pointer; }
+  .chip input { margin: 0; accent-color: var(--accent); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  #saved { display: flex; gap: 6px; flex-wrap: wrap; }
+  #saved .chip { padding-right: 4px; }
+  #saved .chip button { border: 0; background: none; padding: 0 4px; color: var(--muted); }
+  main .wrap { padding-top: 16px; }
+  #status { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); margin-bottom: 14px; }
+  .src { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+  .src .name { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+  .src .err { color: var(--err); font-size: 13px; }
+  .src a { white-space: nowrap; font-size: 14px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  #grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; text-decoration: none; position: relative; }
+  .item:hover { border-color: var(--accent); }
+  .thumb { aspect-ratio: 4 / 3; background: var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .body { padding: 8px 10px 10px; display: grid; gap: 3px; }
+  .title { font-weight: 550; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pr { font-weight: 700; font-size: 16px; }
+  .meta { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { position: absolute; top: 8px; left: 8px; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: var(--badge-fg); }
+  .new { position: absolute; top: 8px; right: 8px; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--new); color: #fff; }
+  #more { display: block; margin: 18px auto 30px; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  @media (max-width: 520px) {
+    #grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .price { width: calc(50% - 4px); }
+    .body { padding: 6px 8px 8px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>🔍 Piackereső</h1>
+    <form id="form" autocomplete="off">
+      <div class="row">
+        <input id="q" type="search" placeholder="Mit keresel? pl. RTX 3060, iPhone 13, Nike Air" required>
+        <input id="min" class="price" type="number" min="0" step="1000" placeholder="Min Ft" inputmode="numeric">
+        <input id="max" class="price" type="number" min="0" step="1000" placeholder="Max Ft" inputmode="numeric">
+        <button class="primary" id="go" type="submit">Keresés</button>
+        <button type="button" id="save" title="Keresés mentése">☆ Mentés</button>
+      </div>
+      <div class="row" id="chips"></div>
+      <details>
+        <summary>Beállítások</summary>
+        <div class="row" style="margin-top:8px">
+          <label class="small">Facebook város (URL-ben szereplő név):
+            <input id="city" type="text" value="budapest" style="width:140px">
+          </label>
+          <label class="chip small"><input id="autoFb" type="checkbox"> Facebook automatikus megnyitása új lapon</label>
+        </div>
+      </details>
+      <div id="saved"></div>
+    </form>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    <div id="status"></div>
+    <div class="toolbar" id="toolbar" hidden>
+      <span id="summary" class="muted small"></span>
+      <div class="row">
+        <button type="button" id="openAll" class="small">Összes oldal megnyitása ↗</button>
+        <select id="sort" aria-label="Rendezés">
+          <option value="mix">Vegyes (legújabbak elöl)</option>
+          <option value="asc">Ár szerint növekvő</option>
+          <option value="desc">Ár szerint csökkenő</option>
+          <option value="source">Forrás szerint</option>
+        </select>
+      </div>
+    </div>
+    <div id="grid"></div>
+    <div class="empty" id="empty">Írj be egy keresőszót, és egyszerre keresek a kiválasztott oldalakon.</div>
+    <button id="more" type="button" hidden>Következő oldal betöltése</button>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("pk." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("pk." + k, JSON.stringify(v)); } catch {} },
+};
+const COLORS = (key) => getComputedStyle(document.documentElement).getPropertyValue("--" + key).trim() || "#888";
+const fmt = new Intl.NumberFormat("hu-HU");
+
+let SOURCES = [];
+let state = { query: null, page: 1, items: [], results: {}, seenBefore: null, loading: false };
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function safeUrl(u) { return /^https?:\/\//i.test(u || "") ? u : "#"; }
+
+async function init() {
+  SOURCES = await fetch("/api/sources").then((r) => r.json());
+  const enabled = store.get("sources", SOURCES.map((s) => s.key));
+  $("chips").innerHTML = SOURCES.map((s) => `
+    <label class="chip"><input type="checkbox" value="${s.key}" ${enabled.includes(s.key) ? "checked" : ""}>
+    <span class="dot" style="background:${COLORS(s.key)}"></span>${esc(s.name)}</label>`).join("");
+  $("chips").addEventListener("change", () => store.set("sources", selectedSources()));
+  $("city").value = store.get("city", "budapest");
+  $("city").addEventListener("change", () => store.set("city", $("city").value.trim() || "budapest"));
+  $("autoFb").checked = store.get("autoFb", false);
+  $("autoFb").addEventListener("change", () => store.set("autoFb", $("autoFb").checked));
+  $("sort").value = store.get("sort", "mix");
+  $("sort").addEventListener("change", () => { store.set("sort", $("sort").value); render(); });
+  $("form").addEventListener("submit", (e) => { e.preventDefault(); startSearch(); });
+  $("more").addEventListener("click", () => runSearch(state.page + 1));
+  $("save").addEventListener("click", saveSearch);
+  $("openAll").addEventListener("click", () => Object.values(state.results).forEach((r) => window.open(r.search_url, "_blank", "noopener")));
+  renderSaved();
+  const p = new URLSearchParams(location.search);
+  if (p.get("q")) {
+    $("q").value = p.get("q"); $("min").value = p.get("min") || ""; $("max").value = p.get("max") || "";
+    startSearch();
+  }
+}
+
+function selectedSources() { return [...$("chips").querySelectorAll("input:checked")].map((i) => i.value); }
+function currentQuery() {
+  return { q: $("q").value.trim(), min: $("min").value.trim(), max: $("max").value.trim(), sources: selectedSources() };
+}
+function queryKey(q) { return [q.q.toLowerCase(), q.min, q.max].join("|"); }
+
+function startSearch() {
+  const q = currentQuery();
+  if (!q.q) return;
+  state = { query: q, page: 1, items: [], results: {}, seenBefore: null, loading: false };
+  const seen = store.get("seen", {});
+  state.seenBefore = seen[queryKey(q)] ? new Set(seen[queryKey(q)]) : null;
+  const url = new URL(location);
+  url.search = new URLSearchParams({ q: q.q, ...(q.min && { min: q.min }), ...(q.max && { max: q.max }) });
+  history.replaceState(null, "", url);
+  runSearch(1);
+}
+
+async function runSearch(page) {
+  if (state.loading) return;
+  state.loading = true;
+  const q = state.query;
+  $("go").disabled = true; $("more").disabled = true;
+  $("go").textContent = "Keresés…";
+  if (page === 1) { $("grid").innerHTML = ""; $("empty").textContent = "Keresés folyamatban…"; $("empty").hidden = false; renderStatus(true); }
+  const params = new URLSearchParams({ q: q.q, page, sources: q.sources.join(","), city: store.get("city", "budapest") });
+  if (q.min) params.set("min", q.min);
+  if (q.max) params.set("max", q.max);
+  try {
+    const data = await fetch("/api/search?" + params).then((r) => r.json());
+    if (data.error) throw new Error(data.error);
+    state.page = page;
+    for (const r of data.sources) {
+      const prev = state.results[r.source];
+      state.results[r.source] = { ...r, total: (prev?.total || 0) + r.count, hasMore: r.count > 0 };
+      r.listings.forEach((it, i) => state.items.push({ ...it, rank: (page - 1) * 1000 + i }));
+      if (page === 1 && r.link_only && $("autoFb").checked) window.open(r.search_url, "_blank", "noopener");
+    }
+    dedupeItems();
+    markSeen();
+  } catch (e) {
+    $("empty").textContent = "Hiba: " + e.message;
+  } finally {
+    state.loading = false;
+    $("go").disabled = false; $("more").disabled = false; $("go").textContent = "Keresés";
+    renderStatus(false); render();
+  }
+}
+
+function dedupeItems() {
+  const seen = new Set();
+  state.items = state.items.filter((it) => { const k = it.url || it.source + it.id; if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+function markSeen() {
+  const all = store.get("seen", {});
+  const key = queryKey(state.query);
+  const ids = new Set(all[key] || []);
+  state.items.forEach((it) => ids.add(it.source + ":" + it.id));
+  all[key] = [...ids].slice(-3000);
+  store.set("seen", all);
+}
+
+function renderStatus(loading) {
+  const keys = state.query ? state.query.sources : [];
+  $("status").innerHTML = SOURCES.filter((s) => keys.includes(s.key)).map((s) => {
+    const r = state.results[s.key];
+    let info;
+    if (loading || !r) info = `<span class="muted small">keresés…</span>`;
+    else if (r.link_only) info = `<span class="muted small">csak megnyitható (bejelentkezés kell)</span>`;
+    else if (r.error) info = `<span class="err" title="${esc(r.error)}">nem sikerült lekérni</span>`;
+    else info = `<span class="muted small">${r.total} találat</span>`;
+    const link = r ? `<a href="${esc(safeUrl(r.search_url))}" target="_blank" rel="noopener">Megnyitás ↗</a>` : "";
+    return `<div class="src"><div><div class="name"><span class="dot" style="background:${COLORS(s.key)}"></span>${esc(s.name)}</div>${info}</div>${link}</div>`;
+  }).join("");
+}
+
+function sorted() {
+  const items = [...state.items];
+  const mode = $("sort").value;
+  const order = SOURCES.map((s) => s.key);
+  const price = (it, dir) => (it.price == null ? (dir > 0 ? Infinity : -Infinity) : it.price);
+  if (mode === "asc") return items.sort((a, b) => price(a, 1) - price(b, 1));
+  if (mode === "desc") return items.sort((a, b) => price(b, -1) - price(a, -1));
+  if (mode === "source") return items.sort((a, b) => order.indexOf(a.source) - order.indexOf(b.source) || a.rank - b.rank);
+  // mix: every site already lists newest first, so interleave them round-robin.
+  return items.sort((a, b) => a.rank - b.rank || order.indexOf(a.source) - order.indexOf(b.source));
+}
+
+function render() {
+  const items = sorted();
+  const names = Object.fromEntries(SOURCES.map((s) => [s.key, s.name]));
+  $("grid").innerHTML = items.map((it) => {
+    const isNew = state.seenBefore && !state.seenBefore.has(it.source + ":" + it.id);
+    const priceText = it.price != null ? fmt.format(it.price) + " Ft" : (it.price_text || "ár nincs megadva");
+    const meta = [it.location, it.posted, it.extra].filter(Boolean).join(" · ");
+    return `<a class="item" href="${esc(safeUrl(it.url))}" target="_blank" rel="noopener">
+      <div class="thumb">${it.image ? `<img src="${esc(safeUrl(it.image))}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith('nincs kép')">` : "nincs kép"}</div>
+      <span class="badge" style="background:${COLORS(it.source)}">${esc(names[it.source] || it.source)}</span>
+      ${isNew ? `<span class="new">ÚJ</span>` : ""}
+      <div class="body">
+        <div class="pr">${esc(priceText)}</div>
+        <div class="title">${esc(it.title)}</div>
+        ${meta ? `<div class="meta" title="${esc(meta)}">${esc(meta)}</div>` : ""}
+      </div></a>`;
+  }).join("");
+  const fetched = Object.values(state.results).filter((r) => !r.link_only);
+  const anyResults = Object.keys(state.results).length > 0;
+  $("toolbar").hidden = !anyResults;
+  $("empty").hidden = items.length > 0 || !anyResults && !state.loading;
+  if (anyResults && !items.length) {
+    $("empty").textContent = fetched.length ? "Nincs találat a lekérhető oldalakon. A fenti „Megnyitás” linkekkel közvetlenül is megnézheted." : "Nyisd meg a fenti linket a találatokhoz.";
+  }
+  const newCount = state.seenBefore ? items.filter((it) => !state.seenBefore.has(it.source + ":" + it.id)).length : 0;
+  $("summary").textContent = `${items.length} hirdetés` + (newCount ? ` · ${newCount} új a legutóbbi keresés óta` : "");
+  $("more").hidden = !fetched.some((r) => r.hasMore && !r.error);
+}
+
+function saveSearch() {
+  const q = currentQuery();
+  if (!q.q) return;
+  const saved = store.get("saved", []).filter((s) => queryKey(s) !== queryKey(q));
+  saved.unshift({ q: q.q, min: q.min, max: q.max });
+  store.set("saved", saved.slice(0, 30));
+  renderSaved();
+}
+
+function renderSaved() {
+  const saved = store.get("saved", []);
+  $("saved").innerHTML = saved.length ? `<span class="muted small" style="align-self:center">Mentett:</span>` + saved.map((s, i) => {
+    const range = s.min || s.max ? ` (${s.min || 0}–${s.max || "∞"} Ft)` : "";
+    return `<span class="chip small"><a href="#" data-i="${i}" style="text-decoration:none">${esc(s.q)}${esc(range)}</a><button type="button" data-del="${i}" title="Törlés">×</button></span>`;
+  }).join("") : "";
+}
+$("saved").addEventListener("click", (e) => {
+  const saved = store.get("saved", []);
+  const del = e.target.closest("[data-del]");
+  const open = e.target.closest("[data-i]");
+  if (del) { saved.splice(+del.dataset.del, 1); store.set("saved", saved); renderSaved(); }
+  else if (open) {
+    e.preventDefault();
+    const s = saved[+open.dataset.i];
+    $("q").value = s.q; $("min").value = s.min || ""; $("max").value = s.max || "";
+    startSearch();
+  }
+});
+
+init();
+</script>
+</body>
+</html>
