@@ -8,7 +8,7 @@ Each app is developed on its own branch until it is merged here. Start a new app
 |---|---|---|---|
 | HomeGuard: local-first Flutter security app (Techson NVR, door station, indoor monitor) | `homeguard/` | `claude/security-camera-mobile-app-kxp2a1` (newest code); `claude/ai-docs-knowledge-base` (agent docs) | `homeguard/AGENTS.md` (docs branch) |
 | Flair Log: Flair 58 gauge reader (camera) + BOOKOO scale shot logger | `flair_log/` | `claude/flair58-brew-logger` | `flair_log/AGENTS.md` |
-| Piackereső: one search across Hardverapró, Jófogás, Vinted (+ Facebook Marketplace link); local Python server + web UI | `piackereso/` | `ccr-8d9bb3c4-tgq8da` | `piackereso/AGENTS.md` |
+| Piackereső: one search across Hardverapró, Jófogás, Vinted and Facebook Marketplace; local Python server + web UI | `piackereso/` | `ccr-8d9bb3c4-tgq8da` | `piackereso/AGENTS.md` |
 
 ## Shared how-tos (every app, existing and new)
 

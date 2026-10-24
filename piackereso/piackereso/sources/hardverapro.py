@@ -7,7 +7,7 @@ from urllib.parse import urlencode, urljoin
 
 from bs4 import BeautifulSoup
 
-from ..common import Listing, SearchQuery, SourceResult, clean, fetch, new_session, parse_price
+from ..common import Listing, SearchQuery, SourceResult, clean, fetch, new_session, parse_price, title_matches
 
 KEY = "hardverapro"
 NAME = "Hardverapró"
@@ -50,6 +50,7 @@ def parse(html: str) -> list[Listing]:
         posted = ""
         if time_el:
             posted = clean(time_el.get_text(" ")) or time_el.get("title", "") or time_el.get("datetime", "")
+            posted = posted.strip("–- ")  # "– Előresorolva" -> "Előresorolva"
         out.append(
             Listing(
                 source=KEY,
@@ -70,5 +71,7 @@ def search(q: SearchQuery) -> SourceResult:
     url = search_url(q)
     res = SourceResult(source=KEY, name=NAME, search_url=url)
     resp = fetch(new_session(), url)
-    res.listings = parse(resp.text)
+    # The page also lists paid "Előresorolva" ads that have nothing to do with the
+    # search; the site searches titles, so keep only ads whose title has every word.
+    res.listings = [item for item in parse(resp.text) if title_matches(item.title, q.text)]
     return res

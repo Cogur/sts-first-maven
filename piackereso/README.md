@@ -1,8 +1,8 @@
 # Piackereső
 
-Egy keresés, több használtpiac: **Hardverapró**, **Jófogás** és **Vinted** találatai
-egy listában, a **Facebook Marketplace** keresés pedig egy kattintással megnyílik
-(ott be kell lenni jelentkezve, ezért azt az app nem kéri le, csak megnyitja).
+Egy keresés, több használtpiac: **Hardverapró**, **Jófogás**, **Vinted** és
+**Facebook Marketplace** találatai egy listában. Ha a Facebook nem ad találatot,
+a keresés ott is egy kattintással megnyílik.
 
 Saját használatra készült: a saját gépeden fut, a keresések a te internetkapcsolatodról mennek ki.
 
@@ -37,12 +37,29 @@ A Windows tűzfal első alkalommal rákérdezhet, ott engedélyezd a *Magánhál
 
 A mentett keresések és a „látott” hirdetések a böngésződben tárolódnak (eszközönként külön).
 
+## Facebook Marketplace
+
+Alapból az app bejelentkezés nélkül próbálja lekérni a találatokat. Ha a Facebook ezt nem engedi, a kártyán „csak megnyitható” áll, és a **Megnyitás ↗** link a saját, bejelentkezett böngésződben nyitja meg a keresést.
+
+Megbízhatóbb, ha megadod a saját Facebook-sütidet (*Beállítások → Facebook belépés*):
+
+1. Chrome-ban vagy Edge-ben nyisd meg a facebook.com-ot bejelentkezve.
+2. F12 → *Application* (Alkalmazás) fül → bal oldalt *Cookies* → `https://www.facebook.com`.
+3. Másold ki a `c_user` és az `xs` sor *Value* értékét a két mezőbe, majd *Mentés*.
+
+Tudnivalók:
+- A sütik csak a te gépeden, a `settings.local.json` fájlban vannak; ne küldd el senkinek, és ne tedd fel GitHubra (a `.gitignore` kizárja).
+- Az automatikus lekérés ellenkezik a Facebook szabályaival. Saját, ritka használatnál ritkán gond, de a Facebook a fiókra biztonsági ellenőrzést vagy ideiglenes korlátozást tehet.
+- Ha kijelentkezel a Facebookról, vagy az `xs` lejár, a kártyán „A Facebook belépés lejárt” hiba jelenik meg: add meg újra a két értéket.
+- Csak az első oldalnyi (kb. 20–25) találat jön le.
+
 ## Ha egy oldal nem ad találatot
 
 Az oldalak időnként átalakítják a felépítésüket vagy védekeznek az automatikus lekérés ellen. Ilyenkor az adott oldal kártyáján „nem sikerült lekérni” vagy 0 találat látszik, a többi oldal működik tovább, és a **Megnyitás ↗** link akkor is jó.
 
 - **Minden oldalnál `curl: (77) error adding trust anchors` hiba:** régebbi verzió hibája volt, ha a mappa nevében ékezet van (pl. `piac-kereső`). Töltsd le az új verziót; az már ékezetes mappából is működik.
-- **Vinted:** a `curl_cffi` csomaggal (benne van a `requirements.txt`-ben) sokkal megbízhatóbb. Ha gyakran keresel gyorsan egymás után, ideiglenesen letilthat; pár perc múlva újra megy.
+- **Vinted:** 2026 szeptemberében a Vinted új címre költöztette a keresőjét; az app már az újat használja. A `curl_cffi` csomaggal (benne van a `requirements.txt`-ben) sokkal megbízhatóbb. Ha gyakran keresel gyorsan egymás után, ideiglenesen letilthat; pár perc múlva újra megy.
+- **Hardverapró:** a találati oldalon fizetett, „Előresorolva” jelölésű hirdetések is vannak, amelyeknek semmi közük a kereséshez; az app csak azokat tartja meg, amelyek címében a keresés minden szava szerepel (ékezettől függetlenül).
 - **Jófogás / Hardverapró:** ha tartósan 0 találat jön, valószínűleg megváltozott az oldal HTML-je; a `piackereso/sources/` alatti fájlban kell igazítani.
 
 A találatok 2 percig gyorsítótárban maradnak, hogy ugyanaz a keresés ne terhelje feleslegesen az oldalakat.

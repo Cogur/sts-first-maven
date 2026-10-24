@@ -20,6 +20,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   a { color: inherit; }
   header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
@@ -47,8 +48,10 @@
   main .wrap { padding-top: 16px; }
   #status { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); margin-bottom: 14px; }
   .src { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+  .src > div { min-width: 0; }
   .src .name { display: flex; align-items: center; gap: 6px; font-weight: 600; }
   .src .err { color: var(--err); font-size: 13px; }
+  .src .note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .src a { white-space: nowrap; font-size: 14px; }
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   #grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
@@ -65,6 +68,8 @@
   #more { display: block; margin: 18px auto 30px; }
   .empty { text-align: center; color: var(--muted); padding: 40px 0; }
   details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  .fbbox { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--card); max-width: 760px; }
+  .fbbox p { margin: 6px 0; }
   @media (max-width: 520px) {
     #grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .price { width: calc(50% - 4px); }
@@ -92,6 +97,19 @@
             <input id="city" type="text" value="budapest" style="width:140px">
           </label>
           <label class="chip small"><input id="autoFb" type="checkbox"> Facebook automatikus megnyitása új lapon</label>
+        </div>
+        <div class="fbbox small">
+          <b>Facebook belépés (nem kötelező)</b> · <span id="fbState" class="muted"></span>
+          <p class="muted">Belépés nélkül az app megpróbálja kijelentkezve lekérni a Marketplace találatokat; ha a Facebook nem enged, marad a link.
+          Belépve megbízhatóbb, de az automatikus lekérés ellenkezik a Facebook szabályaival, és a fiókodra a Facebook biztonsági ellenőrzést vagy korlátozást tehet.
+          A sütik csak ezen a gépen tárolódnak (<code>settings.local.json</code>).</p>
+          <p class="muted">Chrome / Edge: nyisd meg a facebook.com-ot belépve → F12 → <i>Application</i> (Alkalmazás) → <i>Cookies</i> → <code>https://www.facebook.com</code> → másold ki a <code>c_user</code> és az <code>xs</code> sor <i>Value</i> értékét.</p>
+          <div class="row">
+            <input id="fbUser" type="password" placeholder="c_user" autocomplete="off" style="width:160px">
+            <input id="fbXs" type="password" placeholder="xs" autocomplete="off" style="width:220px">
+            <button type="button" id="fbSave">Mentés</button>
+            <button type="button" id="fbClear">Törlés</button>
+          </div>
         </div>
       </details>
       <div id="saved"></div>
@@ -151,11 +169,24 @@ async function init() {
   $("save").addEventListener("click", saveSearch);
   $("openAll").addEventListener("click", () => Object.values(state.results).forEach((r) => window.open(r.search_url, "_blank", "noopener")));
   renderSaved();
+  $("fbSave").addEventListener("click", () => saveFb($("fbUser").value.trim(), $("fbXs").value.trim()));
+  $("fbClear").addEventListener("click", () => saveFb("", ""));
+  fetch("/api/settings").then((r) => r.json()).then(showFbState);
   const p = new URLSearchParams(location.search);
   if (p.get("q")) {
     $("q").value = p.get("q"); $("min").value = p.get("min") || ""; $("max").value = p.get("max") || "";
     startSearch();
   }
+}
+
+function showFbState(st) {
+  $("fbState").textContent = st.fb_cookie_set ? "beállítva ✓" : "nincs beállítva";
+}
+async function saveFb(user, xs) {
+  if ((user || xs) && !(user && xs)) { alert("Mindkét mező kell: c_user és xs."); return; }
+  const st = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fb_c_user: user, fb_xs: xs }) }).then((r) => r.json());
+  $("fbUser").value = ""; $("fbXs").value = "";
+  showFbState(st);
 }
 
 function selectedSources() { return [...$("chips").querySelectorAll("input:checked")].map((i) => i.value); }
@@ -227,7 +258,7 @@ function renderStatus(loading) {
     const r = state.results[s.key];
     let info;
     if (loading || !r) info = `<span class="muted small">keresés…</span>`;
-    else if (r.link_only) info = `<span class="muted small">csak megnyitható (bejelentkezés kell)</span>`;
+    else if (r.link_only) info = `<span class="muted small note" title="${esc(r.note)}">csak megnyitható${r.note ? " · " + esc(r.note) : ""}</span>`;
     else if (r.error) info = `<span class="err" title="${esc(r.error)}">nem sikerült lekérni</span>`;
     else info = `<span class="muted small">${r.total} találat</span>`;
     const link = r ? `<a href="${esc(safeUrl(r.search_url))}" target="_blank" rel="noopener">Megnyitás ↗</a>` : "";

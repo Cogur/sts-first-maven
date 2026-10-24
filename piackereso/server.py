@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from piackereso import search
+from piackereso import search, settings
 from piackereso.common import SearchQuery
 from piackereso.sources import SOURCES
 
@@ -37,7 +37,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._search(params)
         if url.path == "/api/sources":
             return self._json([{"key": k, "name": m.NAME} for k, m in SOURCES.items()])
+        if url.path == "/api/settings":
+            return self._json({"fb_cookie_set": bool(settings.facebook_cookie())})
         return self._static("index.html" if url.path in ("/", "") else url.path.lstrip("/"))
+
+    def do_POST(self):
+        if urlparse(self.path).path != "/api/settings":
+            return self._json({"error": "not found"}, status=404)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            data = json.loads(self.rfile.read(min(length, 65536)) or b"{}")
+        except ValueError:
+            return self._json({"error": "bad json"}, status=400)
+        # Only the Facebook cookie is settable; values are never echoed back.
+        settings.update(
+            fb_c_user=str(data.get("fb_c_user") or "").strip(),
+            fb_xs=str(data.get("fb_xs") or "").strip(),
+        )
+        search.clear_cache()
+        return self._json({"fb_cookie_set": bool(settings.facebook_cookie())})
 
     def _search(self, params: dict):
         text = (params.get("q") or [""])[0].strip()

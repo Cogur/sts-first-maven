@@ -86,6 +86,13 @@ VINTED_JSON = {
 
 
 class PriceTests(unittest.TestCase):
+    def test_title_matches_ignores_accents(self):
+        from piackereso.common import title_matches
+
+        self.assertTrue(title_matches("Mobil klima+páramentesitő", "páramentesítő"))
+        self.assertTrue(title_matches("MSI RTX 3060 12GB", "rtx 3060"))
+        self.assertFalse(title_matches("Windows 11 Pro licenc", "páramentesítő"))
+
     def test_parse_price(self):
         self.assertEqual(parse_price("85 000 Ft"), 85000)
         self.assertEqual(parse_price("12.500,- Ft"), 12500)
@@ -120,6 +127,12 @@ class CaBundleTests(unittest.TestCase):
 
 
 class HardveraproTests(unittest.TestCase):
+    def test_promoted_unrelated_ads_are_dropped(self):
+        page = mock.Mock(text=HARDVERAPRO_HTML)
+        with mock.patch.object(hardverapro, "fetch", return_value=page):
+            res = hardverapro.search(SearchQuery("msi 3060"))
+        self.assertEqual([i.id for i in res.listings], ["1234567"])
+
     def test_parse(self):
         items = hardverapro.parse(HARDVERAPRO_HTML)
         self.assertEqual(len(items), 2)
@@ -155,6 +168,10 @@ class JofogasTests(unittest.TestCase):
         self.assertEqual((a.id, a.title, a.price, a.location), ("150999888", "Nike Air Max 42", 25000, "Érd"))
         self.assertEqual(a.image, "https://img.jofogas.hu/n.jpg")
 
+    def test_posted_label(self):
+        html = JOFOGAS_NEXT_DATA.replace('"subject"', '"date": {"label": "okt 5., 16:09", "value": "1791209390"}, "subject"')
+        self.assertEqual(jofogas.parse(html)[0].posted, "okt 5., 16:09")
+
     def test_link_fallback(self):
         html = '<a href="/budapest/bicikli_150111222.htm">Trek bicikli</a><a href="/szabalyzat">Szabályzat</a>'
         items = jofogas.parse(html)
@@ -173,16 +190,50 @@ class VintedTests(unittest.TestCase):
 
     def test_api_url(self):
         url = vinted.api_url(SearchQuery("nike", max_price=20000))
-        self.assertIn("/api/v2/catalog/items?", url)
+        self.assertTrue(url.startswith("https://api.vinted.hu/svc-catalogue/items?"), url)
         self.assertIn("price_to=20000", url)
         self.assertIn("currency=HUF", url)
 
 
+FACEBOOK_HTML = """<html><body>
+<script type="application/json" data-sjs>%s</script>
+<script>var x = 1;</script></body></html>""" % json.dumps(
+    {"require": [["ScheduledServerJS", "handle", None, [{"__bbox": {"result": {"data": {"marketplace_search": {"feed_units": {"edges": [
+        {"node": {"listing": {
+            "id": "1122334455",
+            "marketplace_listing_title": "Páramentesítő Midea 20L",
+            "listing_price": {"formatted_amount": "35 000 Ft", "amount": "35000.00"},
+            "location": {"reverse_geocode": {"city": "Budapest", "state": "Budapest"}},
+            "primary_listing_photo": {"image": {"uri": "https://scontent.xx.fbcdn.net/p.jpg"}},
+            "is_sold": False}}},
+        {"node": {"listing": {"id": "999", "marketplace_listing_title": "Eladva", "is_sold": True}}},
+    ]}}}}}}]]]}
+)
+
+
 class FacebookTests(unittest.TestCase):
-    def test_link_only(self):
-        res = facebook.search(SearchQuery("bicikli", max_price=50000, fb_city="szeged"))
+    def test_url(self):
+        url = facebook.search_url(SearchQuery("bicikli", max_price=50000, fb_city="szeged"))
+        self.assertEqual(url, "https://www.facebook.com/marketplace/szeged/search?query=bicikli&exact=false&maxPrice=50000")
+
+    def test_parse_embedded_json(self):
+        (a,) = facebook.parse(FACEBOOK_HTML)
+        self.assertEqual((a.id, a.title, a.price, a.price_text, a.location), ("1122334455", "Páramentesítő Midea 20L", 35000, "35 000 Ft", "Budapest"))
+        self.assertEqual(a.url, "https://www.facebook.com/marketplace/item/1122334455/")
+        self.assertEqual(a.image, "https://scontent.xx.fbcdn.net/p.jpg")
+
+    def test_falls_back_to_link_when_logged_out_and_blocked(self):
+        with mock.patch.object(facebook.settings, "facebook_cookie", return_value=""), mock.patch.object(facebook, "fetch", side_effect=RuntimeError("HTTP 400")):
+            res = facebook.search(SearchQuery("x"))
         self.assertTrue(res.link_only)
-        self.assertEqual(res.search_url, "https://www.facebook.com/marketplace/szeged/search?query=bicikli&exact=false&maxPrice=50000")
+        self.assertEqual(res.error, "")
+        self.assertIn("HTTP 400", res.note)
+
+    def test_expired_cookie_is_reported(self):
+        page = mock.Mock(text='<form id="login_form"></form>')
+        with mock.patch.object(facebook.settings, "facebook_cookie", return_value="c_user=1; xs=2"), mock.patch.object(facebook, "fetch", return_value=page):
+            with self.assertRaises(RuntimeError):
+                facebook.search(SearchQuery("x"))
 
 
 class OrchestrationTests(unittest.TestCase):

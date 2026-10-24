@@ -86,6 +86,12 @@ def _parse_markup(soup) -> list[Listing]:
     return out
 
 
+def _posted(value) -> str:
+    if isinstance(value, dict):  # {"label": "okt 5., 16:09", "value": "1791209390"}
+        value = first(value, ("label", "text", "value"))
+    return clean(value) if isinstance(value, (str, int)) else ""
+
+
 def _from_json_obj(d: dict) -> Listing | None:
     """Turn any dict that looks like an ad (title + ad URL) into a Listing."""
     url = first(d, ("url", "link", "href", "share_link", "adUrl"))
@@ -113,7 +119,7 @@ def _from_json_obj(d: dict) -> Listing | None:
         price=price,
         price_text=format_huf(price),
         location=clean(location) if isinstance(location, str) else "",
-        posted=clean(first(d, ("date", "list_time", "datePosted", "created_at")) or ""),
+        posted=_posted(first(d, ("date", "list_time", "datePosted", "created_at"))),
         image=image if isinstance(image, str) else "",
     )
 

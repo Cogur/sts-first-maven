@@ -1,10 +1,12 @@
 """Vinted (vinted.hu).
 
-The catalog page is rendered in the browser, but the site's own JSON endpoint
-(/api/v2/catalog/items) answers once the session holds the access_token_web
-cookie that a normal visit to the home page sets. Installing curl_cffi
-(see requirements.txt) makes the requests look like Chrome, which Vinted's bot
-protection lets through far more often than plain requests.
+The catalog page is rendered in the browser, so results come from the JSON
+endpoint the page itself calls. Since September 2026 that is
+api.vinted.hu/svc-catalogue/items (the old www.vinted.hu/api/v2/catalog/items
+answers 404). It needs what a normal visit to the home page hands out: the
+access_token_web cookie and the X-Anon-Id response header. Installing
+curl_cffi (see requirements.txt) makes the requests look like Chrome, which
+Vinted's bot protection lets through far more often than plain requests.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from ..common import Listing, SearchQuery, SourceResult, clean, fetch, format_hu
 KEY = "vinted"
 NAME = "Vinted"
 BASE = "https://www.vinted.hu"
+API = "https://api.vinted.hu"
 PER_PAGE = 48
 
 
@@ -37,10 +40,12 @@ def search_url(q: SearchQuery) -> str:
     return f"{BASE}/catalog?{urlencode(params)}"
 
 
-def api_url(q: SearchQuery) -> str:
+def api_url(q: SearchQuery, legacy: bool = False) -> str:
     params = _params(q)
     params.update({"page": q.page, "per_page": PER_PAGE})
-    return f"{BASE}/api/v2/catalog/items?{urlencode(params)}"
+    if legacy:
+        return f"{BASE}/api/v2/catalog/items?{urlencode(params)}"
+    return f"{API}/svc-catalogue/items?{urlencode(params)}"
 
 
 def parse(data: dict) -> list[Listing]:
@@ -58,7 +63,7 @@ def parse(data: dict) -> list[Listing]:
         for thumb in photo.get("thumbnails") or []:
             if thumb.get("type") in ("thumb310x430", "thumb310"):
                 image = thumb.get("url") or image
-        url = it.get("url") or f"{BASE}/items/{it.get('id')}"
+        url = it.get("url") or it.get("path") or f"{BASE}/items/{it.get('id')}"
         login = (it.get("user") or {}).get("login")
         extra = " · ".join(
             x for x in (it.get("brand_title"), it.get("size_title"), it.get("status"), login and f"@{login}") if x
@@ -78,14 +83,38 @@ def parse(data: dict) -> list[Listing]:
     return out
 
 
+def api_headers(anon_id: str, cookies: dict) -> dict:
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Origin": BASE,
+        "Referer": BASE + "/",
+        "Locale": "hu-HU",
+        "Platform": "web",
+        "X-Next-App": "marketplace-web",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site",
+    }
+    if anon_id:
+        headers["X-Anon-Id"] = anon_id
+    if cookies:
+        headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+    return headers
+
+
 def search(q: SearchQuery) -> SourceResult:
     res = SourceResult(source=KEY, name=NAME, search_url=search_url(q))
     session = new_session()
-    fetch(session, BASE + "/")  # sets the access_token_web cookie the API needs
-    resp = fetch(
-        session,
-        api_url(q),
-        headers={"Accept": "application/json, text/plain, */*", "Referer": search_url(q)},
-    )
+    home = fetch(session, BASE + "/")  # hands out the cookie and the anonymous id
+    anon_id = (home.headers.get("X-Anon-Id") or "").strip()
+    token = session.cookies.get("access_token_web")
+    headers = api_headers(anon_id, {"access_token_web": token} if token else {})
+    try:
+        resp = fetch(new_session(), api_url(q), headers=headers)
+    except RuntimeError as error:
+        try:  # in case vinted.hu still serves the old endpoint
+            resp = fetch(new_session(), api_url(q, legacy=True), headers=headers)
+        except RuntimeError:
+            raise error from None
     res.listings = parse(resp.json())
     return res

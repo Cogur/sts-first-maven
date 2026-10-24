@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tempfile
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable, Iterator
 
@@ -92,7 +93,8 @@ class SourceResult:
     search_url: str  # the same search on the site itself, always shown to the user
     listings: list[Listing] = field(default_factory=list)
     error: str = ""
-    link_only: bool = False  # True when the source cannot be fetched (Facebook)
+    link_only: bool = False  # True when only the link is usable (Facebook without results)
+    note: str = ""  # informational message shown under the source name
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -102,13 +104,14 @@ class SourceResult:
 
 def new_session():
     s = _http.Session(**_SESSION_ARGS)
-    s.headers.update(
-        {
-            "User-Agent": USER_AGENT,
-            "Accept-Language": "hu-HU,hu;q=0.9,en;q=0.8",
-            "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-        }
-    )
+    s.headers.update({"Accept-Language": "hu-HU,hu;q=0.9,en;q=0.8"})
+    if "impersonate" not in _SESSION_ARGS:  # curl_cffi sends Chrome's own matching headers
+        s.headers.update(
+            {
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+            }
+        )
     return s
 
 
@@ -141,6 +144,19 @@ def parse_price(text: Any) -> int | None:
 
 def format_huf(price: int | None) -> str:
     return "" if price is None else f"{price:,} Ft".replace(",", " ")
+
+
+def fold(text: str) -> str:
+    """Lower-case and strip accents: 'Páramentesítő' -> 'paramentesito'."""
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def title_matches(title: str, query: str) -> bool:
+    """True if every word of the query occurs in the title, ignoring case and accents."""
+    words = re.findall(r"\w+", fold(query))
+    folded = fold(title)
+    return all(w in folded for w in words)
 
 
 def clean(text: Any) -> str:

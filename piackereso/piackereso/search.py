@@ -30,6 +30,10 @@ def _run_one(key: str, q: SearchQuery) -> SourceResult:
     return res
 
 
+def clear_cache() -> None:
+    _cache.clear()
+
+
 def run(q: SearchQuery, keys: list[str]) -> list[SourceResult]:
     keys = [k for k in keys if k in SOURCES] or list(SOURCES)
     return list(_pool.map(lambda k: _run_one(k, q), keys))
