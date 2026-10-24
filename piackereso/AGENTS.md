@@ -16,14 +16,14 @@ Personal meta-search over Hungarian second-hand marketplaces. User docs (Hungari
 
 ## How each site is read
 
-- **Hardverapró:** HTML `li.media[data-uadid]`, `.uad-price`, `.uad-cities`, `.uad-time`. Paging: `offset` (50/page). The page also carries unrelated paid "Előresorolva" ads, so results are filtered to titles containing every query word (`common.title_matches`, accent-insensitive).
+- **Hardverapró:** HTML `li.media[data-uadid]`, `.uad-price`, `.uad-cities`, `.uad-time`. Paging: `offset` (50/page). A cookie-less `keres.php?stext=` request got the plain ad list instead of results (the same link works in a browser), so the session first loads `/aprok/index.html`, then searches with it as `Referer` (unconfirmed fix, Oct 2026). The page also carries unrelated paid "Előresorolva" ads, so results are filtered to titles containing every query word (`common.title_matches`, accent-insensitive).
 - **Jófogás:** tries classic markup → JSON-LD / `__NEXT_DATA__` → any `…_<id>.htm` link. Paging: `o`. Confirmed live (Oct 2026): the embedded-JSON path is the one that fires; `date` is `{label, value}`.
 - **Vinted:** GET `www.vinted.hu/` → `access_token_web` cookie + `X-Anon-Id` response header; then `api.vinted.hu/svc-catalogue/items` with `Cookie`, `X-Anon-Id`, `Locale: hu-HU`, `Platform: web`, `X-Next-App: marketplace-web`. The old `/api/v2/catalog/items` returns 404 since Sep 2026 (kept as fallback). Reference: the `vinted_scraper` PyPI package v5.
 - **Facebook Marketplace:** parses JSON in `<script type="application/json">` for dicts with `marketplace_listing_title`. Logged out by default; falls back to `link_only` with a `note`. Optional user cookie (`c_user` + `xs`) from `settings.local.json` (git-ignored, written via `POST /api/settings`, never echoed back). First page only.
 
 ## Rules
 
-- The cloud sandbox cannot reach these sites (proxy 403), so parsers cannot be checked live there. When a site changes, ask the user to save the result page (Ctrl+S) or the JSON, trim it into a test fixture, then fix the parser.
+- The cloud sandbox cannot reach these sites (proxy 403), so parsers cannot be checked live there. When a site misbehaves, ask the user to run `start.bat --debug`, search once, and send the `debug/` folder (`log.txt` has status, final URL after redirects, Set-Cookie names; one `.html` per fetched URL). Trim the HTML into a test fixture, then fix the parser.
 - Keep every source failure isolated: a source raises, `search.py` reports it, the UI still shows the site's own search link.
 - New source: add a module with the interface above, register it in `sources/__init__.py`, add a `--<key>` colour in `static/index.html` (light and dark), add tests, update this file and `README.md`.
 - Be polite to the sites: no background polling from the server, keep the cache.

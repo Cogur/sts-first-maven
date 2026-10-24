@@ -115,8 +115,35 @@ def new_session():
     return s
 
 
+# Set by `server.py --debug`: every page fetched is saved here so it can be inspected.
+DEBUG_DIR: str | None = None
+
+
+def _debug_dump(url: str, resp) -> None:
+    from datetime import datetime
+    from urllib.parse import urlparse
+
+    os.makedirs(DEBUG_DIR, exist_ok=True)
+    parts = urlparse(url)
+    name = re.sub(r"[^A-Za-z0-9]+", "_", parts.netloc + parts.path).strip("_")[:80]
+    with open(os.path.join(DEBUG_DIR, name + ".html"), "w", encoding="utf-8") as f:
+        f.write(resp.text)
+    cookie_names = sorted({c.split("=", 1)[0].strip() for c in resp.headers.get("Set-Cookie", "").split(",") if "=" in c})
+    with open(os.path.join(DEBUG_DIR, "log.txt"), "a", encoding="utf-8") as f:
+        f.write(
+            f"{datetime.now():%Y-%m-%d %H:%M:%S} {resp.status_code} {url}\n"
+            f"    final url: {resp.url}\n    bytes: {len(resp.content)}  saved: {name}.html"
+            f"  set-cookie names: {', '.join(cookie_names) or '-'}\n"
+        )
+
+
 def fetch(session, url: str, **kwargs) -> Any:
     resp = session.get(url, timeout=TIMEOUT, **kwargs)
+    if DEBUG_DIR:
+        try:
+            _debug_dump(url, resp)
+        except OSError:
+            pass
     if resp.status_code >= 400:
         raise RuntimeError(f"HTTP {resp.status_code} ({url})")
     return resp

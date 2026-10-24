@@ -62,6 +62,17 @@ Az oldalak időnként átalakítják a felépítésüket vagy védekeznek az aut
 - **Hardverapró:** a találati oldalon fizetett, „Előresorolva” jelölésű hirdetések is vannak, amelyeknek semmi közük a kereséshez; az app csak azokat tartja meg, amelyek címében a keresés minden szava szerepel (ékezettől függetlenül).
 - **Jófogás / Hardverapró:** ha tartósan 0 találat jön, valószínűleg megváltozott az oldal HTML-je; a `piackereso/sources/` alatti fájlban kell igazítani.
 
+### Hibakereső mód
+
+Ha egy oldal furcsán viselkedik (pl. a link a böngészőben jó, az appban nem):
+
+```
+start.bat --debug        (Windows)
+./start.sh --debug       (macOS / Linux)
+```
+
+Futtasd le a keresést, majd az app mappájában a `debug/` mappa tartalmazza, amit az app az oldalaktól kapott (`log.txt` és a letöltött `.html` fájlok). Ezeket el lehet küldeni a hibajavításhoz. Süti- és belépési adat nem kerül bele.
+
 A találatok 2 percig gyorsítótárban maradnak, hogy ugyanaz a keresés ne terhelje feleslegesen az oldalakat.
 
 ## Fejlesztés

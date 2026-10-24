@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from piackereso import search, settings
+from piackereso import common, search, settings
 from piackereso.common import SearchQuery
 from piackereso.sources import SOURCES
 
@@ -111,7 +111,12 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--lan", action="store_true", help="listen on every interface so a phone on the same Wi-Fi can open it")
     ap.add_argument("--no-browser", action="store_true", help="do not open the browser on start")
+    ap.add_argument("--debug", action="store_true", help="save every fetched page into the debug/ folder")
     args = ap.parse_args()
+
+    if args.debug:
+        common.DEBUG_DIR = str(Path(__file__).resolve().parent / "debug")
+        print(f"Hibakereső mód: a letöltött oldalak ide kerülnek: {common.DEBUG_DIR}")
 
     host = "0.0.0.0" if args.lan else "127.0.0.1"
     httpd = ThreadingHTTPServer((host, args.port), Handler)

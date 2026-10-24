@@ -260,7 +260,7 @@ function renderStatus(loading) {
     if (loading || !r) info = `<span class="muted small">keresés…</span>`;
     else if (r.link_only) info = `<span class="muted small note" title="${esc(r.note)}">csak megnyitható${r.note ? " · " + esc(r.note) : ""}</span>`;
     else if (r.error) info = `<span class="err" title="${esc(r.error)}">nem sikerült lekérni</span>`;
-    else info = `<span class="muted small">${r.total} találat</span>`;
+    else info = `<span class="muted small note" title="${esc(r.note)}">${r.total} találat${r.note ? " · " + esc(r.note) : ""}</span>`;
     const link = r ? `<a href="${esc(safeUrl(r.search_url))}" target="_blank" rel="noopener">Megnyitás ↗</a>` : "";
     return `<div class="src"><div><div class="name"><span class="dot" style="background:${COLORS(s.key)}"></span>${esc(s.name)}</div>${info}</div>${link}</div>`;
   }).join("");

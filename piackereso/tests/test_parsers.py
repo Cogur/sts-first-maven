@@ -85,6 +85,22 @@ VINTED_JSON = {
 }
 
 
+class DebugDumpTests(unittest.TestCase):
+    def test_fetch_saves_page_and_log(self):
+        from piackereso import common
+
+        resp = mock.Mock(status_code=200, text="<html>ok</html>", content=b"<html>ok</html>", url="https://hardverapro.hu/aprok/index.html", headers={"Set-Cookie": "prf_ls_uad=1; path=/, PHPSESSID=abc; path=/"})
+        session = mock.Mock(get=mock.Mock(return_value=resp))
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(common, "DEBUG_DIR", tmp):
+            common.fetch(session, "https://hardverapro.hu/aprok/keres.php?stext=x")
+            files = sorted(os.listdir(tmp))
+            with open(os.path.join(tmp, "log.txt"), encoding="utf-8") as f:
+                log = f.read()
+        self.assertEqual(files, ["hardverapro_hu_aprok_keres_php.html", "log.txt"])
+        self.assertIn("final url: https://hardverapro.hu/aprok/index.html", log)
+        self.assertIn("PHPSESSID, prf_ls_uad", log)
+
+
 class PriceTests(unittest.TestCase):
     def test_title_matches_ignores_accents(self):
         from piackereso.common import title_matches
@@ -128,10 +144,19 @@ class CaBundleTests(unittest.TestCase):
 
 class HardveraproTests(unittest.TestCase):
     def test_promoted_unrelated_ads_are_dropped(self):
-        page = mock.Mock(text=HARDVERAPRO_HTML)
-        with mock.patch.object(hardverapro, "fetch", return_value=page):
+        page = mock.Mock(text=HARDVERAPRO_HTML, url="https://hardverapro.hu/aprok/index.html")
+        with mock.patch.object(hardverapro, "fetch", return_value=page) as fetch:
             res = hardverapro.search(SearchQuery("msi 3060"))
+            # the ad index is visited first, then the search with that page as referer
+            self.assertEqual(fetch.call_args_list[0].args[1], "https://hardverapro.hu/aprok/index.html")
+            self.assertIn("keres.php?stext=msi+3060", fetch.call_args_list[1].args[1])
+            unrelated = hardverapro.search(SearchQuery("páramentesítő"))
         self.assertEqual([i.id for i in res.listings], ["1234567"])
+
+        res = unrelated
+        self.assertEqual(res.listings, [])
+        self.assertIn("2 hirdetés jött", res.note)
+        self.assertIn("átirányítva", res.note)
 
     def test_parse(self):
         items = hardverapro.parse(HARDVERAPRO_HTML)

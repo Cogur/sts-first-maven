@@ -70,8 +70,21 @@ def parse(html: str) -> list[Listing]:
 def search(q: SearchQuery) -> SourceResult:
     url = search_url(q)
     res = SourceResult(source=KEY, name=NAME, search_url=url)
-    resp = fetch(new_session(), url)
+    session = new_session()
+    # A cookie-less request to keres.php gets the plain ad list instead of the
+    # search results, so first visit the ad index like a browser would.
+    try:
+        fetch(session, f"{BASE}/aprok/index.html")
+    except Exception:  # noqa: BLE001 - the search itself may still work
+        pass
+    resp = fetch(session, url, headers={"Referer": f"{BASE}/aprok/index.html"})
+    found = parse(resp.text)
     # The page also lists paid "Előresorolva" ads that have nothing to do with the
     # search; the site searches titles, so keep only ads whose title has every word.
-    res.listings = [item for item in parse(resp.text) if title_matches(item.title, q.text)]
+    res.listings = [item for item in found if title_matches(item.title, q.text)]
+    if found and not res.listings:
+        final = str(resp.url)
+        res.note = f"{len(found)} hirdetés jött, egyik sem illett a keresésre" + (
+            f" (átirányítva ide: {final})" if final != url else ""
+        )
     return res
