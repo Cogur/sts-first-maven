@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from urllib.parse import urlencode, urljoin
 
 from bs4 import BeautifulSoup
@@ -13,6 +15,11 @@ KEY = "hardverapro"
 NAME = "Hardverapró"
 BASE = "https://hardverapro.hu"
 PER_PAGE = 50  # hardverapro.hu lists 50 ads per page; "offset" pages through them
+INDEX_URL = f"{BASE}/aprok/index.html"
+# The site sends a search back to its main page when it comes within a few
+# seconds of the visitor's first page view. Diagnosed on the user's machine
+# (Oct 2026, tools/diag_hardverapro.py): 3 s after the first visit fails, 8 s works.
+SETTLE_SECONDS = 8.0
 
 
 def search_url(q: SearchQuery) -> str:
@@ -114,34 +121,88 @@ def search_form(html: str, q: SearchQuery) -> tuple[str, str, list[tuple[str, st
     return method, action, fields
 
 
-def search(q: SearchQuery) -> SourceResult:
-    url = search_url(q)
-    res = SourceResult(source=KEY, name=NAME, search_url=url)
-    session = new_session()
-    index_url = f"{BASE}/aprok/index.html"
-    form = None
+def _is_main_page(resp) -> bool:
+    return '"pageType":"mainpage"' in resp.text or str(resp.url).rstrip("/").endswith("/aprok/index.html")
+
+
+def _sleep(seconds: float) -> None:  # patched in tests
+    time.sleep(seconds)
+
+
+class _Visitor:
+    """One long-lived browsing session, reused by every search.
+
+    Its first page view starts the clock; searches wait until the session is
+    SETTLE_SECONDS old, so only the first search after start-up can be slow
+    (server.py warms the session up in the background at start).
+    """
+
+    MAX_AGE = 3600.0
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.session = None
+        self.index_html = ""
+        self.since = 0.0
+
+    def _ensure(self) -> None:
+        if self.session is None or time.monotonic() - self.since > self.MAX_AGE:
+            session = new_session()
+            self.index_html = fetch(session, INDEX_URL).text
+            self.session, self.since = session, time.monotonic()
+
+    def warm_up(self) -> None:
+        with self.lock:
+            self._ensure()
+
+    def _request(self, q: SearchQuery):
+        form = search_form(self.index_html, q) if self.index_html else None
+        headers = {"Referer": INDEX_URL}
+        if form is None:
+            return fetch(self.session, search_url(q), headers=headers)
+        method, action, fields = form
+        if method == "POST":
+            return fetch(self.session, action, method="POST", data=fields, headers=headers)
+        return fetch(self.session, f"{action}?{urlencode(fields)}", headers=headers)
+
+    def search(self, q: SearchQuery):
+        with self.lock:
+            self._ensure()
+            wait = SETTLE_SECONDS - (time.monotonic() - self.since)
+            if wait > 0:
+                _sleep(wait)
+            resp = self._request(q)
+            if _is_main_page(resp):  # sent back anyway: give it time once more
+                _sleep(SETTLE_SECONDS)
+                resp = self._request(q)
+            if _is_main_page(resp):
+                self.session = None  # start a fresh visit next time
+            return resp
+
+
+_visitor = _Visitor()
+
+
+def warm_up() -> None:
+    """Start the browsing session in the background so the first search is fast."""
     try:
-        form = search_form(fetch(session, index_url).text, q)
-    except Exception:  # noqa: BLE001 - fall back to the plain search URL
+        _visitor.warm_up()
+    except Exception:  # noqa: BLE001 - the first search will try again
         pass
-    headers = {"Referer": index_url}
-    if form is None:
-        resp = fetch(session, url, headers=headers)
-    elif form[0] == "POST":
-        resp = fetch(session, form[1], method="POST", data=form[2], headers=headers)
-    else:
-        resp = fetch(session, f"{form[1]}?{urlencode(form[2])}", headers=headers)
-    found = parse(resp.text)
-    # The page also lists paid "Előresorolva" ads that have nothing to do with the
-    # search; the site searches titles, so keep only ads whose title has every word.
-    res.listings = [item for item in found if title_matches(item.title, q.text)]
-    final = str(resp.url)
-    if '"pageType":"mainpage"' in resp.text or final.rstrip("/").endswith("/aprok/index.html"):
-        # The site sends scripted searches back to its main page (Oct 2026), so
-        # offer the search link instead of a misleading "0 results".
-        res.listings = []
+
+
+def search(q: SearchQuery) -> SourceResult:
+    res = SourceResult(source=KEY, name=NAME, search_url=search_url(q))
+    resp = _visitor.search(q)
+    if _is_main_page(resp):
+        # Offer the search link instead of a misleading "0 results".
         res.link_only = True
         res.note = "a Hardverapró a gépi keresést a nyitóoldalra irányította"
-    elif found and not res.listings:
+        return res
+    found = parse(resp.text)
+    # Paid "Előresorolva" ads can appear regardless of the search; the site
+    # searches titles, so keep only ads whose title has every word.
+    res.listings = [item for item in found if title_matches(item.title, q.text)]
+    if found and not res.listings:
         res.note = f"{len(found)} hirdetés jött, egyik sem illett a keresésre"
     return res

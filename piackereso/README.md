@@ -59,6 +59,7 @@ Az oldalak időnként átalakítják a felépítésüket vagy védekeznek az aut
 
 - **Minden oldalnál `curl: (77) error adding trust anchors` hiba:** régebbi verzió hibája volt, ha a mappa nevében ékezet van (pl. `piac-kereső`). Töltsd le az új verziót; az már ékezetes mappából is működik.
 - **Vinted:** 2026 szeptemberében a Vinted új címre költöztette a keresőjét; az app már az újat használja. A `curl_cffi` csomaggal (benne van a `requirements.txt`-ben) sokkal megbízhatóbb. Ha gyakran keresel gyorsan egymás után, ideiglenesen letilthat; pár perc múlva újra megy.
+- **Hardverapró:** az oldal visszadobja a keresést, ha az túl hamar jön az első látogatás után. Ezért az app indításkor a háttérben „belátogat” a Hardverapró-ra, és csak 8 másodperc múlva keres; közvetlenül indítás után az első keresés ezért pár másodpercig tarthat. Ha az oldal mégis visszadobja, a kártyán „csak megnyitható” áll, és a link működik.
 - **Hardverapró:** a találati oldalon fizetett, „Előresorolva” jelölésű hirdetések is vannak, amelyeknek semmi közük a kereséshez; az app csak azokat tartja meg, amelyek címében a keresés minden szava szerepel (ékezettől függetlenül).
 - **Jófogás / Hardverapró:** ha tartósan 0 találat jön, valószínűleg megváltozott az oldal HTML-je; a `core/sources/` alatti fájlban kell igazítani.
 

@@ -10,6 +10,7 @@ import argparse
 import json
 import mimetypes
 import socket
+import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,7 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 from core import common, search, settings
 from core.common import SearchQuery
-from core.sources import SOURCES
+from core.sources import SOURCES, hardverapro
 
 STATIC = Path(__file__).resolve().parent / "static"
 
@@ -120,6 +121,7 @@ def main():
 
     host = "0.0.0.0" if args.lan else "127.0.0.1"
     httpd = ThreadingHTTPServer((host, args.port), Handler)
+    threading.Thread(target=hardverapro.warm_up, daemon=True).start()
     local = f"http://localhost:{args.port}"
     print(f"Piackereső fut: {local}")
     if args.lan:

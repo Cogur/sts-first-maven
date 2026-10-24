@@ -155,23 +155,47 @@ class CaBundleTests(unittest.TestCase):
 
 
 class HardveraproTests(unittest.TestCase):
+    INDEX = "https://hardverapro.hu/aprok/index.html"
+
+    def setUp(self):
+        # every test gets a fresh browsing session and a fake clock for the waits
+        self.slept = []
+        self.now = 1000.0
+
+        def fake_sleep(seconds):
+            self.slept.append(seconds)
+            self.now += seconds
+
+        patches = [
+            mock.patch.object(hardverapro, "_visitor", hardverapro._Visitor()),
+            mock.patch.object(hardverapro, "_sleep", fake_sleep),
+            mock.patch.object(hardverapro.time, "monotonic", lambda: self.now),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def page(self, text, url):
+        return mock.Mock(text=text, url=url)
+
     def test_promoted_unrelated_ads_are_dropped(self):
-        page = mock.Mock(text=HARDVERAPRO_HTML, url="https://hardverapro.hu/aprok/keres.php?stext=x")
-        with mock.patch.object(hardverapro, "fetch", return_value=page) as fetch:
+        results = self.page(HARDVERAPRO_HTML, "https://hardverapro.hu/aprok/keres.php?stext=x")
+        with mock.patch.object(hardverapro, "fetch", return_value=results) as fetch:
             res = hardverapro.search(SearchQuery("msi 3060"))
             # no search form on the page: the ad index is visited first, then the plain search URL
-            self.assertEqual(fetch.call_args_list[0].args[1], "https://hardverapro.hu/aprok/index.html")
+            self.assertEqual(fetch.call_args_list[0].args[1], self.INDEX)
             self.assertIn("keres.php?stext=msi+3060", fetch.call_args_list[1].args[1])
             unrelated = hardverapro.search(SearchQuery("páramentesítő"))
         self.assertEqual([i.id for i in res.listings], ["1234567"])
         self.assertEqual(unrelated.listings, [])
         self.assertIn("2 hirdetés jött", unrelated.note)
 
-    def test_search_submits_the_sites_form(self):
-        index = mock.Mock(text=HARDVERAPRO_FORM, url="https://hardverapro.hu/aprok/index.html")
-        results = mock.Mock(text=HARDVERAPRO_HTML, url="https://hardverapro.hu/aprok/keres.php?stext=msi")
-        with mock.patch.object(hardverapro, "fetch", side_effect=[index, results]) as fetch:
+    def test_search_submits_the_sites_form_after_settling(self):
+        index = self.page(HARDVERAPRO_FORM, self.INDEX)
+        results = self.page(HARDVERAPRO_HTML, "https://hardverapro.hu/aprok/keres.php?stext=msi")
+        with mock.patch.object(hardverapro, "fetch", side_effect=[index, results, results]) as fetch:
             res = hardverapro.search(SearchQuery("msi", max_price=90000))
+            again = hardverapro.search(SearchQuery("msi"))
         url = fetch.call_args_list[1].args[1]
         self.assertTrue(url.startswith("https://hardverapro.hu/aprok/keres.php?"), url)
         self.assertIn("stext=msi", url)
@@ -182,13 +206,36 @@ class HardveraproTests(unittest.TestCase):
         self.assertNotIn("submit", url)
         self.assertEqual([i.id for i in res.listings], ["1234567"])
         self.assertEqual(res.note, "")
+        # the first search waited for the fresh session to settle; the second reused it
+        self.assertEqual(len(self.slept), 1)
+        self.assertGreater(self.slept[0], 7)
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual(len(again.listings), 1)
 
-    def test_redirect_to_index_is_reported(self):
-        index = mock.Mock(text=HARDVERAPRO_FORM, url="https://hardverapro.hu/aprok/index.html")
-        with mock.patch.object(hardverapro, "fetch", side_effect=[index, index]):
+    def test_main_page_is_retried_once_then_reported(self):
+        index = self.page(HARDVERAPRO_FORM, self.INDEX)
+        main = self.page('{"pageType":"mainpage"}' + HARDVERAPRO_HTML, self.INDEX)
+        with mock.patch.object(hardverapro, "fetch", side_effect=[index, main, main]):
             res = hardverapro.search(SearchQuery("kávé"))
+        self.assertEqual(self.slept[-1], hardverapro.SETTLE_SECONDS)
         self.assertIn("nyitóoldalra irányította", res.note)
         self.assertTrue(res.link_only)
+        self.assertEqual(res.listings, [])
+        self.assertIsNone(hardverapro._visitor.session)  # next search starts a fresh visit
+
+    def test_retry_can_succeed(self):
+        index = self.page(HARDVERAPRO_FORM, self.INDEX)
+        main = self.page('{"pageType":"mainpage"}', self.INDEX)
+        results = self.page(HARDVERAPRO_HTML, "https://hardverapro.hu/aprok/keres.php?stext=msi")
+        with mock.patch.object(hardverapro, "fetch", side_effect=[index, main, results]):
+            res = hardverapro.search(SearchQuery("msi"))
+        self.assertFalse(res.link_only)
+        self.assertEqual(len(res.listings), 1)
+
+    def test_warm_up_swallows_errors(self):
+        with mock.patch.object(hardverapro, "fetch", side_effect=RuntimeError("offline")):
+            hardverapro.warm_up()
+        self.assertIsNone(hardverapro._visitor.session)
 
     def test_post_form(self):
         html = HARDVERAPRO_FORM.replace('method="get"', 'method="post"')
