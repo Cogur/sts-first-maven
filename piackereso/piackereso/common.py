@@ -137,8 +137,8 @@ def _debug_dump(url: str, resp) -> None:
         )
 
 
-def fetch(session, url: str, **kwargs) -> Any:
-    resp = session.get(url, timeout=TIMEOUT, **kwargs)
+def fetch(session, url: str, method: str = "GET", **kwargs) -> Any:
+    resp = session.request(method, url, timeout=TIMEOUT, **kwargs)
     if DEBUG_DIR:
         try:
             _debug_dump(url, resp)

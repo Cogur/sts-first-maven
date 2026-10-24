@@ -37,6 +37,18 @@ HARDVERAPRO_HTML = """
 </ul></div>
 """
 
+HARDVERAPRO_FORM = """
+<form class="uad-search" action="/aprok/keres.php" method="get">
+  <input type="text" name="stext" value="">
+  <input type="hidden" name="stcid_text" value=""><input type="hidden" name="stcid" value="">
+  <input type="number" name="minprice"><input type="number" name="maxprice">
+  <input type="hidden" name="__buying" value="0"><input type="checkbox" name="__buying" value="1" checked>
+  <input type="hidden" name="__brandnew" value="0"><input type="checkbox" name="__brandnew" value="1">
+  <select name="order"><option value="date" selected>Dátum</option><option value="price">Ár</option></select>
+  <button type="submit" name="submit">Keresés</button>
+</form>
+"""
+
 JOFOGAS_MARKUP = """
 <div class="list-item">
   <section class="reLiSection imageBox"><img class="img-thumbnail" src="https://img.jofogas.hu/x.jpg"></section>
@@ -90,7 +102,7 @@ class DebugDumpTests(unittest.TestCase):
         from piackereso import common
 
         resp = mock.Mock(status_code=200, text="<html>ok</html>", content=b"<html>ok</html>", url="https://hardverapro.hu/aprok/index.html", headers={"Set-Cookie": "prf_ls_uad=1; path=/, PHPSESSID=abc; path=/"})
-        session = mock.Mock(get=mock.Mock(return_value=resp))
+        session = mock.Mock(request=mock.Mock(return_value=resp))
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(common, "DEBUG_DIR", tmp):
             common.fetch(session, "https://hardverapro.hu/aprok/keres.php?stext=x")
             files = sorted(os.listdir(tmp))
@@ -144,19 +156,42 @@ class CaBundleTests(unittest.TestCase):
 
 class HardveraproTests(unittest.TestCase):
     def test_promoted_unrelated_ads_are_dropped(self):
-        page = mock.Mock(text=HARDVERAPRO_HTML, url="https://hardverapro.hu/aprok/index.html")
+        page = mock.Mock(text=HARDVERAPRO_HTML, url="https://hardverapro.hu/aprok/keres.php?stext=x")
         with mock.patch.object(hardverapro, "fetch", return_value=page) as fetch:
             res = hardverapro.search(SearchQuery("msi 3060"))
-            # the ad index is visited first, then the search with that page as referer
+            # no search form on the page: the ad index is visited first, then the plain search URL
             self.assertEqual(fetch.call_args_list[0].args[1], "https://hardverapro.hu/aprok/index.html")
             self.assertIn("keres.php?stext=msi+3060", fetch.call_args_list[1].args[1])
             unrelated = hardverapro.search(SearchQuery("páramentesítő"))
         self.assertEqual([i.id for i in res.listings], ["1234567"])
+        self.assertEqual(unrelated.listings, [])
+        self.assertIn("2 hirdetés jött", unrelated.note)
 
-        res = unrelated
-        self.assertEqual(res.listings, [])
-        self.assertIn("2 hirdetés jött", res.note)
-        self.assertIn("átirányítva", res.note)
+    def test_search_submits_the_sites_form(self):
+        index = mock.Mock(text=HARDVERAPRO_FORM, url="https://hardverapro.hu/aprok/index.html")
+        results = mock.Mock(text=HARDVERAPRO_HTML, url="https://hardverapro.hu/aprok/keres.php?stext=msi")
+        with mock.patch.object(hardverapro, "fetch", side_effect=[index, results]) as fetch:
+            res = hardverapro.search(SearchQuery("msi", max_price=90000))
+        url = fetch.call_args_list[1].args[1]
+        self.assertTrue(url.startswith("https://hardverapro.hu/aprok/keres.php?"), url)
+        self.assertIn("stext=msi", url)
+        self.assertIn("maxprice=90000", url)
+        self.assertIn("__buying=0&__buying=1", url)  # hidden default + checked box, like a browser
+        self.assertIn("stcid=", url)
+        self.assertNotIn("__brandnew=1", url)  # unchecked box is not sent
+        self.assertNotIn("submit", url)
+        self.assertEqual([i.id for i in res.listings], ["1234567"])
+        self.assertEqual(res.note, "")
+
+    def test_redirect_to_index_is_reported(self):
+        index = mock.Mock(text=HARDVERAPRO_FORM, url="https://hardverapro.hu/aprok/index.html")
+        with mock.patch.object(hardverapro, "fetch", side_effect=[index, index]):
+            res = hardverapro.search(SearchQuery("kávé"))
+        self.assertIn("nyitóoldalra irányította", res.note)
+
+    def test_post_form(self):
+        html = HARDVERAPRO_FORM.replace('method="get"', 'method="post"')
+        self.assertEqual(hardverapro.search_form(html, SearchQuery("x"))[0], "POST")
 
     def test_parse(self):
         items = hardverapro.parse(HARDVERAPRO_HTML)
