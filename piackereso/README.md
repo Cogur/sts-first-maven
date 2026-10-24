@@ -73,6 +73,8 @@ start.bat --debug        (Windows)
 
 Futtasd le a keresést, majd az app mappájában a `debug/` mappa tartalmazza, amit az app az oldalaktól kapott (`log.txt` és a letöltött `.html` fájlok). Ezeket el lehet küldeni a hibajavításhoz. Süti- és belépési adat nem kerül bele.
 
+**Hardverapró-diagnosztika:** a `diag.bat` (macOS / Linux: `.venv/bin/python tools/diag_hardverapro.py kave`) többféle módon próbál keresni a Hardverapró-n, és kiírja, melyik ad találatot. Az eredmény a `debug/diag_hardverapro.txt` fájlba kerül.
+
 A találatok 2 percig gyorsítótárban maradnak, hogy ugyanaz a keresés ne terhelje feleslegesen az oldalakat.
 
 ## Fejlesztés

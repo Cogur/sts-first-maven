@@ -136,8 +136,12 @@ def search(q: SearchQuery) -> SourceResult:
     # search; the site searches titles, so keep only ads whose title has every word.
     res.listings = [item for item in found if title_matches(item.title, q.text)]
     final = str(resp.url)
-    if final.rstrip("/").endswith("/aprok/index.html") or final.rstrip("/") == BASE:
-        res.note = "A Hardverapró a keresést a nyitóoldalra irányította" + ("" if form else " (keresőűrlap nem található)")
+    if '"pageType":"mainpage"' in resp.text or final.rstrip("/").endswith("/aprok/index.html"):
+        # The site sends scripted searches back to its main page (Oct 2026), so
+        # offer the search link instead of a misleading "0 results".
+        res.listings = []
+        res.link_only = True
+        res.note = "a Hardverapró a gépi keresést a nyitóoldalra irányította"
     elif found and not res.listings:
         res.note = f"{len(found)} hirdetés jött, egyik sem illett a keresésre"
     return res

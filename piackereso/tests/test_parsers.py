@@ -188,6 +188,7 @@ class HardveraproTests(unittest.TestCase):
         with mock.patch.object(hardverapro, "fetch", side_effect=[index, index]):
             res = hardverapro.search(SearchQuery("kávé"))
         self.assertIn("nyitóoldalra irányította", res.note)
+        self.assertTrue(res.link_only)
 
     def test_post_form(self):
         html = HARDVERAPRO_FORM.replace('method="get"', 'method="post"')
