@@ -186,8 +186,18 @@ def title_matches(title: str, query: str) -> bool:
     return all(w in folded for w in words)
 
 
+# Zero-width characters some sites (Hardverapró) sprinkle into text against scrapers.
+_INVISIBLE = re.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")
+
+
 def clean(text: Any) -> str:
-    return re.sub(r"\s+", " ", str(text or "")).strip()
+    return re.sub(r"\s+", " ", _INVISIBLE.sub("", str(text or ""))).strip()
+
+
+def clean_block(text: Any) -> str:
+    """Like clean() but keeps line breaks (for ad descriptions)."""
+    lines = (re.sub(r"[ \t\r\f\v]+", " ", line).strip() for line in _INVISIBLE.sub("", str(text or "")).split("\n"))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
 def in_price_range(listing: Listing, q: SearchQuery) -> bool:

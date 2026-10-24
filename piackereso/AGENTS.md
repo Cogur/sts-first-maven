@@ -6,10 +6,13 @@ Personal meta-search over Hungarian second-hand marketplaces. User docs (Hungari
 
 | Path | What |
 |---|---|
-| `server.py` | stdlib `ThreadingHTTPServer`: serves `static/` and `GET /api/search?q=&min=&max=&page=&sources=a,b&city=`, `GET /api/sources`, `GET`/`POST /api/settings` |
+| `server.py` | stdlib `ThreadingHTTPServer`: serves `static/` and `GET /api/search?q=&min=&max=&page=&sources=a,b&city=`, `GET /api/sources`, `GET`/`POST /api/settings`, `POST /api/export` (PDF bytes, or `{"clipboard": true}` → file on the clipboard; copies kept in `exports/`) |
 | `core/search.py` | runs sources in parallel, re-applies the price filter, 2-minute cache, turns exceptions into a per-source `error` |
 | `core/settings.py` | `settings.local.json` (git-ignored): the optional Facebook cookie |
 | `core/common.py` | `Listing`, `SearchQuery`, `SourceResult`, HTTP session (curl_cffi if installed, else requests), `parse_price`, JSON helpers |
+| `core/details.py` | ad pages for the AI export: description + bigger images via the site's description block, JSON-LD, embedded JSON (Facebook `redacted_description`), OpenGraph; host allowlist (`ALLOWED_HOSTS`) so the server never fetches arbitrary URLs |
+| `core/export_pdf.py` | AI-export PDF (fpdf2 + bundled DejaVu Sans in `core/fonts/`, Bitstream Vera licence): instructions for the AI, price stats, overview, then each ad with ≤3 images shrunk to 800 px; `BATCH_SIZE` 30 |
+| `core/clipboard.py` | puts the PDF file itself on the OS clipboard: Windows PowerShell 5.1 `Set-Clipboard -LiteralPath` (via `-EncodedCommand`), macOS `osascript`, Linux `xclip` |
 | `core/sources/<site>.py` | one module per site: `KEY`, `NAME`, `search_url(q)`, `parse(...)`, `search(q)` |
 | `static/index.html` | the whole UI (no build step); saved searches and seen-ad IDs live in `localStorage` |
 | `tools/diag_hardverapro.py` | run on the user's machine (`diag.bat`): tries request variants against Hardverapró, report in `debug/` |
@@ -29,3 +32,5 @@ Personal meta-search over Hungarian second-hand marketplaces. User docs (Hungari
 - New source: add a module with the interface above, register it in `sources/__init__.py`, add a `--<key>` colour in `static/index.html` (light and dark), add tests, update this file and `README.md`.
 - Be polite to the sites: no background polling from the server, keep the cache.
 - Never ask the user to paste passwords or cookies into a chat; they go into the app's settings on their own machine.
+- `start.bat` / `start.sh` reinstall packages whenever `requirements.txt` differs from `.venv/installed-requirements.txt`, so adding a dependency needs no manual step from the user.
+- Hardverapró ad pages go through `hardverapro.fetch_page` (the settled `_Visitor` session), never a fresh session, or they get sent to the main page.

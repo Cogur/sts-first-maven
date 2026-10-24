@@ -180,7 +180,23 @@ class _Visitor:
             return resp
 
 
+    def page(self, url: str):
+        """An ad page fetched in the same settled session; None if sent to the main page."""
+        with self.lock:
+            self._ensure()
+            wait = SETTLE_SECONDS - (time.monotonic() - self.since)
+            if wait > 0:
+                _sleep(wait)
+            resp = fetch(self.session, url, headers={"Referer": INDEX_URL})
+            _sleep(0.3)  # ad pages are fetched in a row; keep the pace human-like
+            return None if _is_main_page(resp) else resp
+
+
 _visitor = _Visitor()
+
+
+def fetch_page(url: str):
+    return _visitor.page(url)
 
 
 def warm_up() -> None:

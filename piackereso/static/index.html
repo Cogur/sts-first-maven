@@ -53,6 +53,11 @@
   .src .err { color: var(--err); font-size: 13px; }
   .src .note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .src a { white-space: nowrap; font-size: 14px; }
+  .aibox { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; display: grid; gap: 8px; }
+  .batch { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 10px; padding: 4px 6px 4px 10px; }
+  .batch button { padding: 5px 9px; font-size: 14px; }
+  #aiStatus.ok { color: var(--accent); }
+  #aiStatus.err { color: var(--err); }
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   #grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
   .item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; text-decoration: none; position: relative; }
@@ -130,6 +135,17 @@
           <option value="source">Forrás szerint</option>
         </select>
       </div>
+    </div>
+    <div class="aibox" id="aibox" hidden>
+      <div class="row">
+        <b>AI-export</b>
+        <span class="muted small">PDF képekkel, csomagonként 30 hirdetés, a fenti rendezés szerint. Töltsd fel a Claude-ba, ChatGPT-be vagy Geminibe.</span>
+      </div>
+      <div class="row">
+        <label class="chip small"><input id="aiDetails" type="checkbox" checked> nagyobb képek + leírás a hirdetések oldaláról (lassabb, de az AI sokkal többet lát)</label>
+      </div>
+      <div class="row" id="aiBatches"></div>
+      <div id="aiStatus" class="small"></div>
     </div>
     <div id="grid"></div>
     <div class="empty" id="empty">Írj be egy keresőszót, és egyszerre keresek a kiválasztott oldalakon.</div>
@@ -305,7 +321,71 @@ function render() {
   const newCount = state.seenBefore ? items.filter((it) => !state.seenBefore.has(it.source + ":" + it.id)).length : 0;
   $("summary").textContent = `${items.length} hirdetés` + (newCount ? ` · ${newCount} új a legutóbbi keresés óta` : "");
   $("more").hidden = !fetched.some((r) => r.hasMore && !r.error);
+  renderExport(items.length);
 }
+
+// ---- AI export -------------------------------------------------------------
+const BATCH = 30;
+const IS_LOCAL = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname);
+let exportBusy = false;
+
+function renderExport(count) {
+  $("aibox").hidden = count === 0;
+  const batches = Math.ceil(count / BATCH);
+  $("aiBatches").innerHTML = Array.from({ length: batches }, (_, b) => {
+    const from = b * BATCH + 1, to = Math.min(count, (b + 1) * BATCH);
+    return `<span class="batch"><b>${from}–${to}</b>
+      <button type="button" data-b="${b}" data-clip="0" ${exportBusy ? "disabled" : ""} title="PDF letöltése">⬇ Letöltés</button>
+      ${IS_LOCAL ? `<button type="button" data-b="${b}" data-clip="1" ${exportBusy ? "disabled" : ""} title="A PDF-fájl a vágólapra kerül: az AI-chatben Ctrl+V">📋 Vágólapra</button>` : ""}
+    </span>`;
+  }).join("");
+}
+
+function aiStatus(text, kind = "") {
+  $("aiStatus").textContent = text;
+  $("aiStatus").className = "small " + kind;
+}
+
+async function exportBatch(b, clip) {
+  if (exportBusy) return;
+  const all = sorted();
+  const items = all.slice(b * BATCH, (b + 1) * BATCH).map(({ source, id, title, url, price, price_text, location, posted, image, extra }) =>
+    ({ source, id, title, url, price, price_text, location, posted, image, extra }));
+  const details = $("aiDetails").checked;
+  const q = state.query;
+  exportBusy = true; renderExport(all.length);
+  aiStatus(`PDF készül (${items.length} hirdetés)… ` + (details ? "a hirdetések oldalainak letöltése 20–60 másodpercig is tarthat." : ""));
+  try {
+    const resp = await fetch("/api/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q.q, min: q.min, max: q.max, offset: b * BATCH, total: all.length, details, clipboard: clip,
+        items, prices: all.map(({ source, price }) => ({ source, price })) }),
+    });
+    if (clip || !resp.ok) {
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "ismeretlen hiba");
+      aiStatus(`✓ A PDF a vágólapon (${data.kb} KB). Kattints az AI-chat beviteli mezőjébe, nyomj Ctrl+V-t, és írd mellé: „Kövesd a PDF elején lévő utasítást.”`, "ok");
+    } else {
+      const blob = await resp.blob();
+      const name = (resp.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/)?.[1] || "piackereso.pdf";
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      aiStatus(`✓ Letöltve: ${name}. Töltsd fel az AI-chatbe, és írd mellé: „Kövesd a PDF elején lévő utasítást.”`, "ok");
+    }
+  } catch (e) {
+    aiStatus("Hiba: " + e.message, "err");
+  } finally {
+    exportBusy = false; renderExport(sorted().length);
+  }
+}
+
+$("aiBatches").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-b]");
+  if (btn) exportBatch(+btn.dataset.b, btn.dataset.clip === "1");
+});
 
 function saveSearch() {
   const q = currentQuery();

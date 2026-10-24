@@ -13,7 +13,7 @@ Kell hozzá Python 3.10 vagy újabb ([python.org](https://www.python.org/downloa
 - **Windows:** dupla kattintás a `start.bat` fájlra.
 - **macOS / Linux:** `./start.sh`
 
-Az első indítás telepíti a szükséges csomagokat (`.venv` mappába), utána megnyílik a böngésző: <http://localhost:8765>.
+Az első indítás (és minden olyan frissítés után, ami új csomagot igényel) telepíti a szükséges csomagokat (`.venv` mappába), utána megnyílik a böngésző: <http://localhost:8765>.
 
 ### Telefonról
 
@@ -36,6 +36,19 @@ A Windows tűzfal első alkalommal rákérdezhet, ott engedélyezd a *Magánhál
 - Beállításokban: Facebook város (pl. `szeged`, `debrecen`), és hogy a Facebook keresés automatikusan megnyíljon-e.
 
 A mentett keresések és a „látott” hirdetések a böngésződben tárolódnak (eszközönként külön).
+
+## AI-export (PDF képekkel)
+
+A találatok fölötti **AI-export** dobozban a találatokból PDF készül, amit feltölthetsz a Claude-ba, a ChatGPT-be vagy a Geminibe, és segítséget kérhetsz a döntéshez.
+
+- **Csomagok:** egy PDF-be 30 hirdetés kerül (1–30, 31–60, …), a felül beállított rendezés szerint. Így a fájl kicsi marad (jellemzően néhány MB), és minden AI-ba feltölthető. Ha több hirdetés kell, előbb töltsd be a „Következő oldal” gombbal.
+- **Tartalom:** az első oldalon az AI-nak szóló utasítás (típus azonosítása, kapható-e újként, új ár, értékelés, legjobb vételek), az összes betöltött találat árstatisztikája oldalanként, és egy áttekintő lista. Utána hirdetésenként: cím, ár, hely, dátum, link, leírás és legfeljebb 3 kép.
+- **Nagyobb képek + leírás:** ha be van pipálva, az app a hirdetések saját oldaláról letölti a leírást és a nagyobb képeket. Így az AI sokkal pontosabban felismeri a típust, de 30 hirdetésnél ez 20–60 másodpercig is tarthat. Ha nem kapható, marad a találati lista kis képe.
+- **⬇ Letöltés:** a PDF letöltődik.
+- **📋 Vágólapra:** a PDF-fájl a vágólapra kerül (mintha Intézőben Ctrl+C-t nyomtál volna rajta). Kattints az AI-chat beviteli mezőjébe, Ctrl+V, és írd mellé: „Kövesd a PDF elején lévő utasítást.” Csak azon a gépen működik, ahol az app fut (Windowson PowerShell-lel; macOS-en is; Linuxon `xclip` kell). Telefonról a letöltést használd.
+- Minden elkészült PDF megmarad az app `exports` mappájában is.
+
+A webes keresést (új ár) csak akkor tudja az AI megnézni, ha a chatben be van kapcsolva a webes keresés; különben ezt jelzi.
 
 ## Facebook Marketplace
 

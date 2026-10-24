@@ -16,11 +16,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from core import common, search, settings
+from core import clipboard, common, search, settings
 from core.common import SearchQuery
 from core.sources import SOURCES, hardverapro
 
 STATIC = Path(__file__).resolve().parent / "static"
+EXPORTS = Path(__file__).resolve().parent / "exports"
 
 
 def _int(params: dict, name: str) -> int | None:
@@ -43,13 +44,16 @@ class Handler(BaseHTTPRequestHandler):
         return self._static("index.html" if url.path in ("/", "") else url.path.lstrip("/"))
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/settings":
+        path = urlparse(self.path).path
+        if path not in ("/api/settings", "/api/export"):
             return self._json({"error": "not found"}, status=404)
         try:
             length = int(self.headers.get("Content-Length") or 0)
-            data = json.loads(self.rfile.read(min(length, 65536)) or b"{}")
+            data = json.loads(self.rfile.read(min(length, 2_000_000)) or b"{}")
         except ValueError:
             return self._json({"error": "bad json"}, status=400)
+        if path == "/api/export":
+            return self._export(data)
         # Only the Facebook cookie is settable; values are never echoed back.
         settings.update(
             fb_c_user=str(data.get("fb_c_user") or "").strip(),
@@ -57,6 +61,45 @@ class Handler(BaseHTTPRequestHandler):
         )
         search.clear_cache()
         return self._json({"fb_cookie_set": bool(settings.facebook_cookie())})
+
+    def _export(self, data: dict):
+        """Build the AI-export PDF; send it back, or put it on the clipboard."""
+        try:
+            from core import export_pdf  # needs fpdf2; imported here so search works without it
+        except ImportError:
+            return self._json({"error": "Hiányzik az fpdf2 csomag: indítsd újra a start.bat-tal, az telepíti."}, status=500)
+        items = [it for it in data.get("items") or [] if isinstance(it, dict)][: export_pdf.BATCH_SIZE]
+        if not items:
+            return self._json({"error": "Nincs exportálható hirdetés."}, status=400)
+        prices = [p for p in data.get("prices") or [] if isinstance(p, dict)][:5000]
+        meta = {
+            "query": str(data.get("query") or "")[:200],
+            "min": str(data.get("min") or "")[:12],
+            "max": str(data.get("max") or "")[:12],
+            "offset": max(0, int(data.get("offset") or 0)),
+            "total": int(data.get("total") or len(items)),
+            "prices": prices,
+        }
+        try:
+            pdf = export_pdf.build(meta, items, with_details=bool(data.get("details", True)))
+        except Exception as exc:  # noqa: BLE001
+            return self._json({"error": f"A PDF nem készült el: {exc}"}, status=500)
+        EXPORTS.mkdir(exist_ok=True)
+        name = export_pdf.filename(meta, len(items))
+        target = EXPORTS / name
+        target.write_bytes(pdf)
+        if data.get("clipboard"):
+            try:
+                clipboard.copy_file(target)
+            except RuntimeError as exc:
+                return self._json({"error": str(exc), "file": str(target)}, status=500)
+            return self._json({"ok": True, "file": str(target), "kb": len(pdf) // 1024})
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+        self.send_header("Content-Length", str(len(pdf)))
+        self.end_headers()
+        self.wfile.write(pdf)
 
     def _search(self, params: dict):
         text = (params.get("q") or [""])[0].strip()
