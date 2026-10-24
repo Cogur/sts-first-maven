@@ -41,6 +41,7 @@ A mentett keresések és a „látott” hirdetések a böngésződben tárolód
 
 Az oldalak időnként átalakítják a felépítésüket vagy védekeznek az automatikus lekérés ellen. Ilyenkor az adott oldal kártyáján „nem sikerült lekérni” vagy 0 találat látszik, a többi oldal működik tovább, és a **Megnyitás ↗** link akkor is jó.
 
+- **Minden oldalnál `curl: (77) error adding trust anchors` hiba:** régebbi verzió hibája volt, ha a mappa nevében ékezet van (pl. `piac-kereső`). Töltsd le az új verziót; az már ékezetes mappából is működik.
 - **Vinted:** a `curl_cffi` csomaggal (benne van a `requirements.txt`-ben) sokkal megbízhatóbb. Ha gyakran keresel gyorsan egymás után, ideiglenesen letilthat; pár perc múlva újra megy.
 - **Jófogás / Hardverapró:** ha tartósan 0 találat jön, valószínűleg megváltozott az oldal HTML-je; a `piackereso/sources/` alatti fájlban kell igazítani.
 

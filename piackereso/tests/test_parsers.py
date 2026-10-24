@@ -1,7 +1,9 @@
 """Parser tests on trimmed copies of each site's markup. Run: python -m unittest discover -s tests"""
 
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -9,7 +11,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from piackereso import search  # noqa: E402
-from piackereso.common import Listing, SearchQuery, SourceResult, in_price_range, parse_price  # noqa: E402
+from piackereso.common import Listing, SearchQuery, SourceResult, ascii_ca_bundle, in_price_range, parse_price  # noqa: E402
 from piackereso.sources import facebook, hardverapro, jofogas, vinted  # noqa: E402
 
 HARDVERAPRO_HTML = """
@@ -99,6 +101,22 @@ class PriceTests(unittest.TestCase):
         self.assertTrue(in_price_range(Listing("s", "1", "t", "u", price=None), q))
         self.assertFalse(in_price_range(Listing("s", "1", "t", "u", price=999), q))
         self.assertFalse(in_price_range(Listing("s", "1", "t", "u", price=5001), q))
+
+
+class CaBundleTests(unittest.TestCase):
+    def test_non_ascii_path_is_copied_to_ascii_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src_dir = os.path.join(tmp, "piac-kereső")
+            os.mkdir(src_dir)
+            src = os.path.join(src_dir, "cacert.pem")
+            with open(src, "w") as f:
+                f.write("CERT")
+            self.assertEqual(ascii_ca_bundle(tmp + "/ok.pem", []), tmp + "/ok.pem")
+            dst = ascii_ca_bundle(src, [None, src_dir, tmp])
+            self.assertEqual(dst, os.path.join(tmp, "piackereso-cacert.pem"))
+            with open(dst) as f:
+                self.assertEqual(f.read(), "CERT")
+            self.assertIsNone(ascii_ca_bundle(src, [src_dir]))
 
 
 class HardveraproTests(unittest.TestCase):

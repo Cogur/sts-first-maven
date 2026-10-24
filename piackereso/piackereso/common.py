@@ -3,18 +3,54 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import tempfile
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable, Iterator
 
-try:  # curl_cffi mimics a real Chrome TLS handshake; sites with bot protection prefer it.
-    from curl_cffi import requests as _http
 
-    _IMPERSONATE = {"impersonate": "chrome"}
-except ImportError:  # plain requests works for most sites
-    import requests as _http
 
-    _IMPERSONATE = {}
+def ascii_ca_bundle(src: str, candidate_dirs: Iterable[str | None]) -> str | None:
+    """Path of the CA bundle that libcurl on Windows can open.
+
+    libcurl cannot open a CA file whose path has non-ASCII characters (e.g. a
+    folder named "piac-kereső" fails with curl error 77), so such a bundle is
+    copied into the first writable ASCII-only folder. None if there is none.
+    """
+    if src.isascii():
+        return src
+    for folder in candidate_dirs:
+        if not folder or not folder.isascii():
+            continue
+        dst = os.path.join(folder, "piackereso-cacert.pem")
+        try:
+            if not os.path.exists(dst) or os.path.getsize(dst) != os.path.getsize(src):
+                shutil.copyfile(src, dst)
+            return dst
+        except OSError:
+            continue
+    return None
+
+
+def _pick_backend():
+    try:  # curl_cffi mimics a real Chrome TLS handshake; sites with bot protection prefer it.
+        import certifi
+        from curl_cffi import requests as curl_requests
+    except ImportError:
+        curl_requests = None
+    if curl_requests is not None:
+        dirs = (tempfile.gettempdir(), os.environ.get("PUBLIC"), os.environ.get("PROGRAMDATA"), os.path.expanduser("~"))
+        ca = ascii_ca_bundle(certifi.where(), dirs)
+        if ca:
+            return curl_requests, {"impersonate": "chrome", "verify": ca}
+    import requests  # plain requests works for most sites
+
+    return requests, {}
+
+
+_http, _SESSION_ARGS = _pick_backend()
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -65,7 +101,7 @@ class SourceResult:
 
 
 def new_session():
-    s = _http.Session(**_IMPERSONATE)
+    s = _http.Session(**_SESSION_ARGS)
     s.headers.update(
         {
             "User-Agent": USER_AGENT,
