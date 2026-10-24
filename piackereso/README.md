@@ -7,7 +7,7 @@ Egy keresés, több használtpiac: **Hardverapró**, **Jófogás**, **Vinted** �
 Saját használatra készült: a saját gépeden fut, a keresések a te internetkapcsolatodról mennek ki.
 
 **📖 Használati útmutató: [`docs/utmutato.md`](docs/utmutato.md)**
-(telepítés, keresés, AI-export, Facebook-belépés, telefonról és bárhonnan való elérés, hibaelhárítás)
+(telepítés, keresés, AI-export, Facebook, telefonról és bárhonnan való elérés, hibaelhárítás)
 
 ## Gyors indítás
 

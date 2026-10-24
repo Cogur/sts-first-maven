@@ -70,7 +70,7 @@ Az indítás után az app a háttérben „belátogat” a Hardverapróra (lásd
 **Egyéb:**
 - **☆ Mentés:** elmenti a keresést; a mentett kereséseket a keresőmező alatt egy kattintással újra lefuttathatod.
 - **Összes oldal megnyitása ↗:** mind a négy oldalon megnyitja a keresést új lapokon. A böngésző elsőre letilthatja a felugró ablakokat: engedélyezd a címsor jobb oldalán megjelenő ikonnal.
-- **Beállítások:** a Facebook-kereséshez használt város (pl. `szeged`, `debrecen`), és a Facebook-belépés (lásd [5. pont](#5-facebook-marketplace)).
+- **Beállítások:** a Facebook-kereséshez használt város (pl. `szeged`, `debrecen`), és a nem kötelező Facebook-belépés (lásd [5. pont](#5-facebook-marketplace)).
 
 ---
 
@@ -111,9 +111,13 @@ Minden elkészült PDF megmarad az app **`exports`** mappájában is.
 
 ## 5. Facebook Marketplace
 
-Alapból az app **bejelentkezés nélkül** próbálja lekérni a Facebook-találatokat. Ha a Facebook ezt nem engedi, a kártyán „csak megnyitható” áll, és a **Megnyitás ↗** link a saját, bejelentkezett böngésződben nyitja meg a keresést.
+A Facebook-találatok **bejelentkezés nélkül is jönnek**, ehhez semmit nem kell beállítani. Az app ugyanúgy kéri le őket, mint egy kijelentkezett böngésző.
 
-### Belépéssel (megbízhatóbb, nem kötelező)
+Ha egyszer mégis „csak megnyitható” jelenik meg a Facebook kártyáján (a Facebook időnként szigorít a kijelentkezett látogatókkal szemben), két lehetőséged van:
+- a **Megnyitás ↗** link a saját, bejelentkezett böngésződben nyitja meg a keresést;
+- vagy add meg a Facebook-belépést az appnak, lásd lent.
+
+### Belépéssel (csak ha belépés nélkül nem jön találat)
 
 1. Chrome-ban vagy Edge-ben nyisd meg a facebook.com-ot **bejelentkezve**.
 2. Nyomd meg az **F12**-t → felül az **Application** (Alkalmazás) fül → bal oldalt **Cookies** → `https://www.facebook.com`.
@@ -185,7 +189,7 @@ Röviden a lépések; a Cloudflare felülete változhat, a pontos, aktuális le�
 3. Adj hozzá egy nyilvános címet (pl. `piac.sajatdomain.hu`), és állítsd be, hogy a `http://localhost:8765` címre mutasson.
 4. **Kötelező:** a Zero Trust **Access** részében hozz létre egy alkalmazást erre a címre, és egy szabályt, ami csak a **te e-mail-címedet** engedi be.
 
-> ⚠️ **Access-védelem nélkül ne tedd ki az appot az internetre!** Az appnak nincs saját jelszava: bárki keresgélhetne vele a te internetedről, és a te Facebook-belépéseddel. Ugyanezért ne használd a jelszó nélküli „gyors” alagutakat (pl. `trycloudflare.com`) sem.
+> ⚠️ **Access-védelem nélkül ne tedd ki az appot az internetre!** Az appnak nincs saját jelszava: bárki keresgélhetne vele a te internetedről, és ha megadtad, a te Facebook-belépéseddel. Ugyanezért ne használd a jelszó nélküli „gyors” alagutakat (pl. `trycloudflare.com`) sem.
 
 ### Online használat korlátai
 
@@ -214,7 +218,7 @@ Az oldalak időnként átalakítják a felépítésüket, vagy védekeznek az au
 | **Hardverapró**: „csak megnyitható · a gépi keresést a nyitóoldalra irányította” | A Hardverapró az új látogatót pár másodpercig robotnak nézi. Az app ezért indításkor előre „belátogat”, és csak 8 másodperc múlva keres. Ha mégis előfordul, keress újra kicsit később. |
 | **Hardverapró**: kevesebb találat, mint az oldalon | Az app csak azokat a hirdetéseket tartja meg, amelyek **címében** a keresés minden szava szerepel, mert a Hardverapró fizetett, a kereséshez nem illő hirdetéseket is mutat. |
 | **Vinted**: hiba vagy 0 találat | Ha sokszor keresel gyorsan egymás után, a Vinted ideiglenesen letilthat; pár perc múlva újra megy. |
-| **Facebook**: „csak megnyitható” | Belépés nélkül a Facebook gyakran nem ad találatot. Használd a linket, vagy add meg a belépést ([5. pont](#5-facebook-marketplace)). |
+| **Facebook**: „csak megnyitható” | A Facebook most nem adott találatot belépés nélkül (máskor szokott). Próbáld később, használd a linket, vagy add meg a belépést ([5. pont](#5-facebook-marketplace)). |
 | **Facebook**: „A Facebook belépés lejárt” | Add meg újra a `c_user` és `xs` értéket. |
 | Képek helyén „nincs kép” | Az oldal nem adta ki a képet; a hirdetésre kattintva megnézheted. |
 | PDF-ben „(leírás nem érhető el)” | Az app nem tudta kiolvasni a hirdetés oldalát. A link a PDF-ben ilyenkor is ott van. |
@@ -235,7 +239,7 @@ Az oldalak időnként átalakítják a felépítésüket, vagy védekeznek az au
 | Mi | Hol |
 |---|---|
 | Mentett keresések, „ÚJ” jelölések, beállított város | a böngésződben, eszközönként külön |
-| Facebook-belépés (`c_user`, `xs`) | `settings.local.json` az app mappájában, csak a te gépeden |
+| Facebook-belépés (`c_user`, `xs`), ha megadtad | `settings.local.json` az app mappájában, csak a te gépeden |
 | Elkészült PDF-ek | `exports` mappa az app mappájában |
 | Hibakereső fájlok | `debug` mappa (csak `--debug` módban jön létre) |
 | Telepített csomagok | `.venv` mappa |
