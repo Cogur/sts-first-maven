@@ -15,9 +15,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from piackereso import common, search, settings
-from piackereso.common import SearchQuery
-from piackereso.sources import SOURCES
+from core import common, search, settings
+from core.common import SearchQuery
+from core.sources import SOURCES
 
 STATIC = Path(__file__).resolve().parent / "static"
 

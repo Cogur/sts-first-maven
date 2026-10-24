@@ -10,9 +10,9 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from piackereso import search  # noqa: E402
-from piackereso.common import Listing, SearchQuery, SourceResult, ascii_ca_bundle, in_price_range, parse_price  # noqa: E402
-from piackereso.sources import facebook, hardverapro, jofogas, vinted  # noqa: E402
+from core import search  # noqa: E402
+from core.common import Listing, SearchQuery, SourceResult, ascii_ca_bundle, in_price_range, parse_price  # noqa: E402
+from core.sources import facebook, hardverapro, jofogas, vinted  # noqa: E402
 
 HARDVERAPRO_HTML = """
 <div class="uad-list"><ul class="list-unstyled">
@@ -99,7 +99,7 @@ VINTED_JSON = {
 
 class DebugDumpTests(unittest.TestCase):
     def test_fetch_saves_page_and_log(self):
-        from piackereso import common
+        from core import common
 
         resp = mock.Mock(status_code=200, text="<html>ok</html>", content=b"<html>ok</html>", url="https://hardverapro.hu/aprok/index.html", headers={"Set-Cookie": "prf_ls_uad=1; path=/, PHPSESSID=abc; path=/"})
         session = mock.Mock(request=mock.Mock(return_value=resp))
@@ -115,7 +115,7 @@ class DebugDumpTests(unittest.TestCase):
 
 class PriceTests(unittest.TestCase):
     def test_title_matches_ignores_accents(self):
-        from piackereso.common import title_matches
+        from core.common import title_matches
 
         self.assertTrue(title_matches("Mobil klima+páramentesitő", "páramentesítő"))
         self.assertTrue(title_matches("MSI RTX 3060 12GB", "rtx 3060"))
