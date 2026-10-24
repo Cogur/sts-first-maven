@@ -1,6 +1,6 @@
 # Agent guide: Piackereső
 
-Personal meta-search over Hungarian second-hand marketplaces. User docs (Hungarian): [`README.md`](README.md).
+Personal meta-search over Hungarian second-hand marketplaces. User guide (Hungarian): [`docs/utmutato.md`](docs/utmutato.md); [`README.md`](README.md) is only an overview and quick start.
 
 ## Layout
 
@@ -29,7 +29,9 @@ Personal meta-search over Hungarian second-hand marketplaces. User docs (Hungari
 
 - The cloud sandbox cannot reach these sites (proxy 403), so parsers cannot be checked live there. When a site misbehaves, ask the user to run `start.bat --debug`, search once, and send the `debug/` folder (`log.txt` has status, final URL after redirects, Set-Cookie names; one `.html` per fetched URL). Trim the HTML into a test fixture, then fix the parser.
 - Keep every source failure isolated: a source raises, `search.py` reports it, the UI still shows the site's own search link.
-- New source: add a module with the interface above, register it in `sources/__init__.py`, add a `--<key>` colour in `static/index.html` (light and dark), add tests, update this file and `README.md`.
+- New source: add a module with the interface above, register it in `sources/__init__.py`, add a `--<key>` colour in `static/index.html` (light and dark), add tests, update this file and `docs/utmutato.md`.
+- Any user-visible change (button, setting, behaviour, error text) updates `docs/utmutato.md` in the same commit.
+- Remote access is documented, not built: the app must run at home because Vinted / Facebook (and likely Hardverapró) reject datacenter IPs. `docs/utmutato.md` §7 covers Tailscale and Cloudflare Tunnel + Access; the app has no login of its own, so never suggest exposing it without one.
 - Be polite to the sites: no background polling from the server, keep the cache.
 - Never ask the user to paste passwords or cookies into a chat; they go into the app's settings on their own machine.
 - `start.bat` / `start.sh` reinstall packages whenever `requirements.txt` differs from `.venv/installed-requirements.txt`, so adding a dependency needs no manual step from the user.

@@ -10,7 +10,7 @@ wall instead of results to logged-out visitors, so:
   in settings.local.json) the request is made as that user.
 
 Automated access is against Facebook's terms; with a cookie, the risk (a
-checkpoint or restriction) falls on the user's account. The README says so.
+checkpoint or restriction) falls on the user's account. docs/utmutato.md says so.
 """
 
 from __future__ import annotations
