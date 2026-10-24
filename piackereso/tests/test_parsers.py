@@ -276,6 +276,12 @@ class JofogasTests(unittest.TestCase):
         self.assertEqual((a.id, a.title, a.price, a.location), ("150999888", "Nike Air Max 42", 25000, "Érd"))
         self.assertEqual(a.image, "https://img.jofogas.hu/n.jpg")
 
+    def test_full_size_image_with_thumbnail_fallback(self):
+        html = JOFOGAS_NEXT_DATA.replace("https://img.jofogas.hu/n.jpg", "https://img.jofogas.hu/thumbs/Nike_Air_123.jpg")
+        (a,) = jofogas.parse(html)
+        self.assertEqual(a.image, "https://img.jofogas.hu/images/Nike_Air_123.jpg")
+        self.assertEqual(a.image_fallback, "https://img.jofogas.hu/thumbs/Nike_Air_123.jpg")
+
     def test_posted_label(self):
         html = JOFOGAS_NEXT_DATA.replace('"subject"', '"date": {"label": "okt 5., 16:09", "value": "1791209390"}, "subject"')
         self.assertEqual(jofogas.parse(html)[0].posted, "okt 5., 16:09")

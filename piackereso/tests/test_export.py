@@ -122,6 +122,24 @@ class PdfTests(unittest.TestCase):
         pdf, load, _ = self.build(with_details=False)
         self.assertEqual([c.args[0] for c in load.call_args_list], ["https://cdn.rios.hu/dl/uad/t1.jpg"])
 
+    def test_falls_back_to_thumbnail_when_full_size_fails(self):
+        item = {"source": "jofogas", "id": "9", "title": "Bicikli", "url": "https://www.jofogas.hu/a_150123459.htm", "price": 1000,
+                "image": "https://img.jofogas.hu/images/Bicikli_9.jpg", "image_fallback": "https://img.jofogas.hu/thumbs/Bicikli_9.jpg"}
+        tried = []
+
+        def fake_load(url):
+            tried.append(url)
+            return (jpeg(), 320, 240) if "/thumbs/" in url else None
+
+        with mock.patch.object(export_pdf, "load_image", side_effect=fake_load):
+            export_pdf.build({"query": "x", "prices": []}, [item], with_details=False)
+        self.assertEqual(tried, ["https://img.jofogas.hu/images/Bicikli_9.jpg", "https://img.jofogas.hu/thumbs/Bicikli_9.jpg"])
+
+    def test_detail_page_thumbnails_are_upgraded_too(self):
+        self.assertEqual(export_pdf.image_candidates("https://img.jofogas.hu/thumbs/a.jpg"),
+                         ["https://img.jofogas.hu/images/a.jpg", "https://img.jofogas.hu/thumbs/a.jpg"])
+        self.assertEqual(export_pdf.image_candidates("https://images1.vinted.net/t/x.jpg"), ["https://images1.vinted.net/t/x.jpg"])
+
     def test_price_stats(self):
         rows = export_pdf.price_stats([{"source": "jofogas", "price": 10000}, {"source": "jofogas", "price": 30000}, {"source": "vinted", "price": None}])
         self.assertEqual(rows[0], ("Jófogás", 2, "10 000 Ft", "20 000 Ft", "30 000 Ft"))

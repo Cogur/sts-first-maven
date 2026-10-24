@@ -21,7 +21,7 @@ from fpdf import FPDF
 from PIL import Image
 
 from . import details as ad_details
-from .common import fetch, fold, format_huf, new_session
+from .common import fetch, fold, format_huf, image_candidates, new_session
 from .sources import SOURCES
 
 BATCH_SIZE = 30
@@ -75,6 +75,15 @@ def load_image(url: str) -> tuple[bytes, int, int] | None:
     return result
 
 
+def load_first(urls: list[str]) -> tuple[bytes, int, int] | None:
+    """The first of `urls` that downloads as an image (bigger variants come first)."""
+    for url in urls:
+        img = load_image(url)
+        if img:
+            return img
+    return None
+
+
 _UNSUPPORTED = re.compile("[\U00010000-\U0010ffff️‍]")  # emoji etc.: not in the font
 
 
@@ -113,16 +122,22 @@ class _PDF(FPDF):
 def build(meta: dict, items: list[dict], with_details: bool = True) -> bytes:
     """meta: query, min, max, offset (0-based), total, prices [{source, price}]."""
     infos = ad_details.get_many(items) if with_details else [ad_details.Details() for _ in items]
-    image_urls = []
+    image_urls = []  # per ad: per image, the URLs to try in order
     for it, info in zip(items, infos):
         urls = list(info.images) or ([it["image"]] if it.get("image") else [])
-        image_urls.append(urls[: ad_details.MAX_IMAGES])
+        tries = []
+        for url in urls[: ad_details.MAX_IMAGES]:
+            candidates = image_candidates(url)
+            if url == it.get("image") and it.get("image_fallback"):
+                candidates.append(it["image_fallback"])
+            tries.append(list(dict.fromkeys(candidates)))
+        image_urls.append(tries)
     with ThreadPoolExecutor(max_workers=6) as pool:
-        flat = list(pool.map(load_image, [u for urls in image_urls for u in urls]))
+        flat = list(pool.map(load_first, [c for tries in image_urls for c in tries]))
     images, i = [], 0
-    for urls in image_urls:
-        images.append([img for img in flat[i : i + len(urls)] if img])
-        i += len(urls)
+    for tries in image_urls:
+        images.append([img for img in flat[i : i + len(tries)] if img])
+        i += len(tries)
 
     names = {k: m.NAME for k, m in SOURCES.items()}
     first = meta.get("offset", 0) + 1

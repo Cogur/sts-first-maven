@@ -24,6 +24,7 @@ from ..common import (
     fetch,
     first,
     format_huf,
+    image_candidates,
     iter_json_ld,
     new_session,
     parse_price,
@@ -157,6 +158,10 @@ def parse(html: str) -> list[Listing]:
     for strategy in (_parse_markup, _parse_json, _parse_links):
         found = dedupe(strategy(soup))
         if found:
+            for item in found:  # the search page only links small thumbnails
+                candidates = image_candidates(item.image)
+                if len(candidates) > 1:
+                    item.image, item.image_fallback = candidates[0], candidates[-1]
             return found
     return []
 

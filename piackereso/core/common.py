@@ -72,6 +72,7 @@ class Listing:
     posted: str = ""
     image: str = ""
     extra: str = ""  # e.g. brand / size on Vinted
+    image_fallback: str = ""  # shown if `image` (an upgraded, bigger variant) fails to load
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -167,6 +168,17 @@ def parse_price(text: Any) -> int | None:
     s = re.sub(r"[.,]\d{1,2}(?!\d)", "", s)
     digits = "".join(_DIGITS.findall(s))
     return int(digits) if digits else None
+
+
+def image_candidates(url: str) -> list[str]:
+    """Bigger variants of a known thumbnail URL first, then the URL itself.
+
+    Jófogás serves every photo as img.jofogas.hu/thumbs/<name> (small) and
+    img.jofogas.hu/images/<name> (full size).
+    """
+    if "img.jofogas.hu/thumbs/" in url:
+        return [url.replace("/thumbs/", "/images/", 1), url]
+    return [url] if url else []
 
 
 def format_huf(price: int | None) -> str:

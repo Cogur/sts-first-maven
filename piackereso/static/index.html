@@ -294,6 +294,12 @@ function sorted() {
   return items.sort((a, b) => a.rank - b.rank || order.indexOf(a.source) - order.indexOf(b.source));
 }
 
+function imgFailed(img) {
+  // a bigger variant that does not exist falls back to the site's thumbnail
+  if (img.dataset.fb) { const fb = img.dataset.fb; img.dataset.fb = ""; img.src = fb; }
+  else img.replaceWith("nincs kép");
+}
+
 function render() {
   const items = sorted();
   const names = Object.fromEntries(SOURCES.map((s) => [s.key, s.name]));
@@ -302,7 +308,7 @@ function render() {
     const priceText = it.price != null ? fmt.format(it.price) + " Ft" : (it.price_text || "ár nincs megadva");
     const meta = [it.location, it.posted, it.extra].filter(Boolean).join(" · ");
     return `<a class="item" href="${esc(safeUrl(it.url))}" target="_blank" rel="noopener">
-      <div class="thumb">${it.image ? `<img src="${esc(safeUrl(it.image))}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith('nincs kép')">` : "nincs kép"}</div>
+      <div class="thumb">${it.image ? `<img src="${esc(safeUrl(it.image))}" data-fb="${esc(/^https?:\/\//i.test(it.image_fallback || "") ? it.image_fallback : "")}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="imgFailed(this)">` : "nincs kép"}</div>
       <span class="badge" style="background:${COLORS(it.source)}">${esc(names[it.source] || it.source)}</span>
       ${isNew ? `<span class="new">ÚJ</span>` : ""}
       <div class="body">
@@ -349,8 +355,8 @@ function aiStatus(text, kind = "") {
 async function exportBatch(b, clip) {
   if (exportBusy) return;
   const all = sorted();
-  const items = all.slice(b * BATCH, (b + 1) * BATCH).map(({ source, id, title, url, price, price_text, location, posted, image, extra }) =>
-    ({ source, id, title, url, price, price_text, location, posted, image, extra }));
+  const items = all.slice(b * BATCH, (b + 1) * BATCH).map(({ source, id, title, url, price, price_text, location, posted, image, image_fallback, extra }) =>
+    ({ source, id, title, url, price, price_text, location, posted, image, image_fallback, extra }));
   const details = $("aiDetails").checked;
   const q = state.query;
   exportBusy = true; renderExport(all.length);
