@@ -17,6 +17,7 @@ These apply to all apps, including ones created later. Follow them without being
 | Task mentions… / when | Read |
 |---|---|
 | APK, Android build, install on phone, test build, CI, GitHub Actions, release page; **creating any new Flutter app** | [`docs/build-apk.md`](docs/build-apk.md) |
+| Raspberry Pi, run on a Pi, home server, start on boot, systemd service, SSH install | [`docs/raspberry-pi-service.md`](docs/raspberry-pi-service.md) |
 
 ## Rules that apply to the whole repo
 

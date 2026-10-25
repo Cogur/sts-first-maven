@@ -15,6 +15,7 @@ Personal meta-search over Hungarian second-hand marketplaces. User guide (Hungar
 | `core/clipboard.py` | puts the PDF file itself on the OS clipboard: Windows PowerShell 5.1 `Set-Clipboard -LiteralPath` (via `-EncodedCommand`), macOS `osascript`, Linux `xclip` |
 | `core/sources/<site>.py` | one module per site: `KEY`, `NAME`, `search_url(q)`, `parse(...)`, `search(q)` |
 | `static/index.html` | the whole UI (no build step); saved searches and seen-ad IDs live in `localStorage`. Relevance: with "Csak pontos találatok" (`#strictOnly`, default on) only ads whose title (or description checked via `POST /api/describe`) contains every query word (`fold`, accent/case-insensitive substring) stay in the main list and the AI export; the rest go to "Másodlagos találatok". With "Leírásban is keressen" (`#descAuto`, default on) the description check runs by itself after every search / next page; otherwise via the "Leírások ellenőrzése" button. Static files are served with `Cache-Control: no-cache` so an update is never hidden by the browser cache |
+| `install-pi.sh` | Raspberry Pi install / update: `.venv`, offline self-test, systemd unit `piackereso.service` (`--lan --no-browser`, `User=` the invoking user); rerunnable after `git pull`. Generic part: root `docs/raspberry-pi-service.md` |
 | `tools/diag_hardverapro.py` | run on the user's machine (`diag.bat`): tries request variants against Hardverapró, report in `debug/` |
 | `tests/test_parsers.py` | parser tests on trimmed site markup; `python -m unittest discover -s tests` |
 

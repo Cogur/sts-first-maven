@@ -16,6 +16,7 @@ Az app a saját gépeden fut, a keresések a te internetkapcsolatodról mennek k
 8. [Frissítés új verzióra](#8-frissítés-új-verzióra)
 9. [Ha valami nem működik](#9-ha-valami-nem-működik)
 10. [Hol vannak az adataim?](#10-hol-vannak-az-adataim)
+11. [Telepítés Raspberry Pi-re](#11-telepítés-raspberry-pi-re)
 
 ---
 
@@ -160,7 +161,7 @@ A mentett keresések és az „ÚJ” jelölések eszközönként külön tárol
 
 **Miért nem egy bérelt szerveren fut?** A keresések annak a gépnek az internetéről mennek ki, ahol az app fut. A Vinted és a Facebook az adatközponti (bérelt szerveres) IP-címeket jellemzően kitiltja, a Hardverapró is gyanakvó. Ezért a legjobb, ha az app **otthon** fut, és kívülről egy biztonságos „alagúton” éred el.
 
-Mindkét lenti megoldáshoz kell egy **otthoni gép, ami mindig be van kapcsolva** (asztali gép, régi laptop, Raspberry Pi), és amin az app fut.
+Mindkét lenti megoldáshoz kell egy **otthoni gép, ami mindig be van kapcsolva** (asztali gép, régi laptop, Raspberry Pi), és amin az app fut. Raspberry Pi-hez lásd a [11. pontot](#11-telepítés-raspberry-pi-re): ott az app szolgáltatásként fut, az alábbi Windows-os előkészítés nem kell.
 
 ### Előkészítés: az app automatikus indítása (Windows)
 
@@ -254,3 +255,75 @@ Az oldalak időnként átalakítják a felépítésüket, vagy védekeznek az au
 Ezek közül a `settings.local.json`, az `exports`, a `debug` és a `.venv` soha nem kerül fel a GitHubra.
 
 A keresések 2 percig gyorsítótárban maradnak, hogy ugyanaz a keresés ne terhelje feleslegesen az oldalakat.
+
+---
+
+## 11. Telepítés Raspberry Pi-re
+
+A Pi-n az app **rendszerszolgáltatásként** fut: a Pi bekapcsolásakor magától elindul, ha leállna, újraindul, és nincs hozzá nyitva tartandó ablak. A keresések az otthoni internetedről mennek ki, így minden oldal úgy működik, mint a gépeden.
+
+**Kell hozzá:** **64 bites** Raspberry Pi OS (asztalos vagy Lite), internet, és SSH-elérés. Az alábbiakban a Pi neve `otthonpi`, a felhasználó `felhasznalo`: írd be helyettük a sajátodat (amit az Imagerben megadtál).
+
+### Telepítés
+
+1. Lépj be a Pi-re a gépedről (Windowson: *Parancssor* vagy *PowerShell*), vagy nyiss távoli parancssort a Raspberry Pi Connectben:
+   ```
+   ssh felhasznalo@otthonpi.local
+   ```
+2. Töltsd le az appot, és futtasd a telepítőt:
+   ```
+   git clone --depth 1 -b ccr-8d9bb3c4-tgq8da https://github.com/Cogur/sts-first-maven.git
+   cd sts-first-maven/piackereso
+   ./install-pi.sh
+   ```
+   A telepítő egyszer kéri a jelszavadat (`sudo`). Első alkalommal pár percig tart: telepíti a csomagokat, lefuttat egy önellenőrzést, beállítja és elindítja a szolgáltatást. A végén kiírja a címet.
+3. Nyisd meg a gépeden vagy a telefonodon (ugyanazon a hálózaton): **`http://otthonpi.local:8765`**
+   Ha a `.local` név nem működik (főleg egyes Android telefonokon), használd a telepítő által kiírt IP-címes linket (pl. `http://192.168.1.50:8765`).
+
+Indítás után az app a háttérben „belátogat” a Hardverapróra, ezért az első keresésnél a Hardverapró-találatok pár másodperccel később jönnek.
+
+### Frissítés új verzióra
+
+```
+cd ~/sts-first-maven && git pull && ./piackereso/install-pi.sh
+```
+
+A telepítő újrafuttatása biztonságos: csak az új csomagokat telepíti, és újraindítja az appot. A beállításaid (`settings.local.json`) és az `exports` mappa megmaradnak.
+
+### Kezelés
+
+| Mit szeretnél | Parancs |
+|---|---|
+| Fut-e? | `systemctl status piackereso` |
+| Újraindítás | `sudo systemctl restart piackereso` |
+| Napló élőben (kilépés: Ctrl+C) | `journalctl -u piackereso -f` |
+| Leállítás | `sudo systemctl stop piackereso` |
+| Ne induljon el magától | `sudo systemctl disable --now piackereso` |
+| Teljes eltávolítás | `sudo systemctl disable --now piackereso`, `sudo rm /etc/systemd/system/piackereso.service`, majd töröld a `~/sts-first-maven` mappát |
+
+Ha a Pi-n a Cockpit webes kezelőfelületet is használod (`http://otthonpi.local:9090`), a *Services* (Szolgáltatások) között a `piackereso` is megjelenik, onnan is újraindítható és a naplója is olvasható.
+
+### Ami a Pi-n másképp van
+
+- A **📋 Vágólapra** gomb nem jelenik meg, ha a Piackeresőt egy másik gépről nyitod meg (a PDF a Pi-n készül, a te vágólapodhoz nem fér hozzá). Használd a **⬇ Letöltés**t.
+- A **Facebook-belépés** (ha megadod) és a PDF-ek a Pi-n tárolódnak: `~/sts-first-maven/piackereso/settings.local.json` és `.../exports`.
+- **Hibakereső mód:**
+  ```
+  sudo systemctl stop piackereso
+  cd ~/sts-first-maven/piackereso && .venv/bin/python server.py --lan --no-browser --debug
+  ```
+  Keress a böngészőben, majd a Pi-n **Ctrl+C**, és indítsd vissza: `sudo systemctl start piackereso`. A `debug` mappát a gépedre így másolhatod (a gépeden, ne a Pi-n futtasd):
+  ```
+  scp -r felhasznalo@otthonpi.local:sts-first-maven/piackereso/debug .
+  ```
+- **Hardverapró-diagnosztika:** `cd ~/sts-first-maven/piackereso && .venv/bin/python tools/diag_hardverapro.py kave`
+
+### Elérés otthonon kívülről
+
+A **Raspberry Pi Connect** a Pi képernyőjét és parancssorát adja, a Piackereső weboldalát nem. Ahhoz a [7. pont](#7-elérés-bárhonnan-online) **Tailscale**-je kell, a Pi-re így telepítheted:
+```
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+```
+A `tailscale up` kiír egy linket: nyisd meg, és lépj be ugyanazzal a fiókkal, amivel a telefonodon. Utána a telefonon (bekapcsolt Tailscale mellett) bárhonnan: `http://otthonpi:8765`
+
