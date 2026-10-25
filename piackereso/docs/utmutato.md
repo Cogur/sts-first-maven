@@ -31,7 +31,7 @@ Az apphoz **Python 3.10 vagy újabb** kell.
 
 ### Az app letöltése
 
-- **GitHubról:** <https://github.com/cogur/sts-first-maven/archive/refs/heads/ccr-8d9bb3c4-tgq8da.zip> (privát repónál előbb jelentkezz be a GitHubra). A zipben a `piackereso` mappa kell.
+- **GitHubról:** <https://github.com/Cogur/project-cogur/archive/refs/heads/ccr-8d9bb3c4-tgq8da.zip>. A zipben a `piackereso` mappa kell.
 - Vagy a kapott `piackereso.zip` fájlból.
 
 Csomagold ki egy mappába, például `Dokumentumok\piackereso`. Ékezetes mappanév is jó.
@@ -272,8 +272,8 @@ A Pi-n az app **rendszerszolgáltatásként** fut: a Pi bekapcsolásakor magát�
    ```
 2. Töltsd le az appot, és futtasd a telepítőt:
    ```
-   git clone --depth 1 -b ccr-8d9bb3c4-tgq8da https://github.com/Cogur/sts-first-maven.git
-   cd sts-first-maven/piackereso
+   git clone --depth 1 -b ccr-8d9bb3c4-tgq8da https://github.com/Cogur/project-cogur.git
+   cd project-cogur/piackereso
    ./install-pi.sh
    ```
    A telepítő egyszer kéri a jelszavadat (`sudo`). Első alkalommal pár percig tart: telepíti a csomagokat, lefuttat egy önellenőrzést, beállítja és elindítja a szolgáltatást. A végén kiírja a címet.
@@ -285,10 +285,18 @@ Indítás után az app a háttérben „belátogat” a Hardverapróra, ezért a
 ### Frissítés új verzióra
 
 ```
-cd ~/sts-first-maven && git pull && ./piackereso/install-pi.sh
+cd ~/project-cogur && git pull && ./piackereso/install-pi.sh
 ```
 
 A telepítő újrafuttatása biztonságos: csak az új csomagokat telepíti, és újraindítja az appot. A beállításaid (`settings.local.json`) és az `exports` mappa megmaradnak.
+
+**Ha még a régi néven töltötted le** (a GitHub-projekt korábban `sts-first-maven` volt, és a mappád `~/sts-first-maven`): a frissítés így is működik, mert a GitHub átirányít. Az átálláshoz egyszer futtasd:
+```
+mv ~/sts-first-maven ~/project-cogur
+cd ~/project-cogur && git remote set-url origin https://github.com/Cogur/project-cogur.git
+./piackereso/install-pi.sh
+```
+A telepítő újrafuttatása kell, mert a szolgáltatás a mappa helyét tartalmazza.
 
 ### Kezelés
 
@@ -299,24 +307,24 @@ A telepítő újrafuttatása biztonságos: csak az új csomagokat telepíti, és
 | Napló élőben (kilépés: Ctrl+C) | `journalctl -u piackereso -f` |
 | Leállítás | `sudo systemctl stop piackereso` |
 | Ne induljon el magától | `sudo systemctl disable --now piackereso` |
-| Teljes eltávolítás | `sudo systemctl disable --now piackereso`, `sudo rm /etc/systemd/system/piackereso.service`, majd töröld a `~/sts-first-maven` mappát |
+| Teljes eltávolítás | `sudo systemctl disable --now piackereso`, `sudo rm /etc/systemd/system/piackereso.service`, majd töröld a `~/project-cogur` mappát |
 
 Ha a Pi-n a Cockpit webes kezelőfelületet is használod (`http://otthonpi.local:9090`), a *Services* (Szolgáltatások) között a `piackereso` is megjelenik, onnan is újraindítható és a naplója is olvasható.
 
 ### Ami a Pi-n másképp van
 
 - A **📋 Vágólapra** gomb nem jelenik meg, ha a Piackeresőt egy másik gépről nyitod meg (a PDF a Pi-n készül, a te vágólapodhoz nem fér hozzá). Használd a **⬇ Letöltés**t.
-- A **Facebook-belépés** (ha megadod) és a PDF-ek a Pi-n tárolódnak: `~/sts-first-maven/piackereso/settings.local.json` és `.../exports`.
+- A **Facebook-belépés** (ha megadod) és a PDF-ek a Pi-n tárolódnak: `~/project-cogur/piackereso/settings.local.json` és `.../exports`.
 - **Hibakereső mód:**
   ```
   sudo systemctl stop piackereso
-  cd ~/sts-first-maven/piackereso && .venv/bin/python server.py --lan --no-browser --debug
+  cd ~/project-cogur/piackereso && .venv/bin/python server.py --lan --no-browser --debug
   ```
   Keress a böngészőben, majd a Pi-n **Ctrl+C**, és indítsd vissza: `sudo systemctl start piackereso`. A `debug` mappát a gépedre így másolhatod (a gépeden, ne a Pi-n futtasd):
   ```
-  scp -r felhasznalo@otthonpi.local:sts-first-maven/piackereso/debug .
+  scp -r felhasznalo@otthonpi.local:project-cogur/piackereso/debug .
   ```
-- **Hardverapró-diagnosztika:** `cd ~/sts-first-maven/piackereso && .venv/bin/python tools/diag_hardverapro.py kave`
+- **Hardverapró-diagnosztika:** `cd ~/project-cogur/piackereso && .venv/bin/python tools/diag_hardverapro.py kave`
 
 ### Elérés otthonon kívülről
 

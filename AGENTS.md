@@ -1,4 +1,4 @@
-# Agent guide: sts-first-maven
+# Agent guide: project-cogur
 
 This file is the always-on router for every AI agent (Claude Code, Cursor, Copilot, Codex…) and a map for humans. Keep it short: it points at docs, it does not repeat them.
 

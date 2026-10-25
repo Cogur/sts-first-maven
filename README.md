@@ -1,4 +1,4 @@
-# sts-first-maven
+# project-cogur
 
 Apps live on their own branches (see the table in [`AGENTS.md`](AGENTS.md)):
 

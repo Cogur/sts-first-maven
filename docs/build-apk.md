@@ -155,9 +155,9 @@ GraphQL-based `gh` commands (`gh release view`, `gh pr …`) are blocked; use
 `gh run` and `gh api` (REST).
 
 ```bash
-gh run list  --repo Cogur/sts-first-maven --workflow <app>-test-apk.yml --limit 3
-gh run view  <run-id> --repo Cogur/sts-first-maven      # status + ANNOTATIONS (build errors)
-gh api repos/Cogur/sts-first-maven/releases/tags/<app>-<N> \
+gh run list  --repo Cogur/project-cogur --workflow <app>-test-apk.yml --limit 3
+gh run view  <run-id> --repo Cogur/project-cogur      # status + ANNOTATIONS (build errors)
+gh api repos/Cogur/project-cogur/releases/tags/<app>-<N> \
   --jq '.assets[].browser_download_url'                  # direct .apk link
 ```
 
