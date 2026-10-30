@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import '../rtsp/rtsp_client.dart';
 import '../security/secure_store.dart';
 import 'tvt_lapi_client.dart';
 import 'tvt_net_client.dart';
@@ -37,7 +38,42 @@ class TvtProbe {
   static String mask(String s) =>
       s.length <= 6 ? '***' : '${s.substring(0, 3)}***${s.substring(s.length - 3)}';
 
-  Future<List<String>> run(String host, Credentials? creds, {int httpPort = 80}) async {
+  /// Stream paths tried in order. Stops at the first auth failure so a
+  /// wrong password cannot run into the recorder's login lockout.
+  static const rtspPaths = [
+    '/chID=1&streamType=sub&linkType=tcp',
+    '/chID=1&streamType=main&linkType=tcp',
+    '/chID=1&streamType=main',
+    '/chID=01&streamType=main',
+    '/profile1',
+  ];
+
+  Future<void> _probeRtsp(String host, int port, Credentials creds, List<String> out) async {
+    for (final path in rtspPaths) {
+      try {
+        final r = await RtspClient.probe(
+          uri: Uri.parse('rtsp://$host:$port$path'),
+          username: creds.username,
+          password: creds.password,
+          timeout: const Duration(seconds: 4),
+          backchannel: false,
+        );
+        out.add(
+          'RTSP $path: OK, video ${r.videoCodec}, audio ${r.audioCodec}${r.server == null ? '' : ', server ${r.server}'}',
+        );
+        // Report main too when sub works, but no further variants.
+        if (path.contains('streamType=main') || path == rtspPaths[1]) return;
+      } on RtspException catch (e) {
+        out.add('RTSP $path: ${e.message}${e.detail == null ? '' : ' (${e.detail})'}');
+        if (e.isAuthFailure) {
+          out.add('  stopped probing to avoid locking the account');
+          return;
+        }
+      }
+    }
+  }
+
+  Future<List<String>> run(String host, Credentials? creds, {int httpPort = 80, int rtspPort = 554}) async {
     final out = <String>['# $host'];
     final open = <int>{};
     await Future.wait(
@@ -84,6 +120,8 @@ class TvtProbe {
       }
     }
 
+    if (creds != null && await _open(host, rtspPort)) await _probeRtsp(host, rtspPort, creds, out);
+
     if (open.contains(httpPort) && creds != null) {
       final web = TvtWebClient(
         host: host,
@@ -94,6 +132,14 @@ class TvtProbe {
       try {
         await web.login();
         out.add('Web interface (NVMS-9000): login OK');
+        try {
+          final chans = await web.channels();
+          out.add(
+            '  Channels: ${chans.map((c) => '${c.number} ${c.online ? 'online' : 'OFFLINE'}${c.model.isEmpty ? '' : ' ${c.model}'}').join('; ')}',
+          );
+        } on TvtWebException catch (e) {
+          out.add('  Channels: $e');
+        }
         try {
           final r = await web.rtspServer();
           out.add('  RTSP service: ${r.enabled ? 'on' : 'off'}, port ${r.port}, ${r.authType}');

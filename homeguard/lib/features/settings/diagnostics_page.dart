@@ -34,7 +34,12 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     for (final e in hosts.entries) {
       final d = registry.byId(e.value)!;
       try {
-        final lines = await probe.run(e.key, registry.credentialsFor(d.id), httpPort: d.httpPort);
+        final lines = await probe.run(
+          e.key,
+          registry.credentialsFor(d.id),
+          httpPort: d.httpPort,
+          rtspPort: d.rtspPort,
+        );
         if (!mounted) return;
         setState(() => _lines.addAll(['', '${d.name}:', ...lines]));
       } catch (err) {

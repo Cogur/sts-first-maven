@@ -76,6 +76,10 @@ class _RtspPlayerWidgetState extends State<RtspPlayerWidget> with WidgetsBinding
   bool _disposed = false;
   bool _paused = false;
 
+  /// Last warning/error from libmpv/ffmpeg: the real reason behind a generic
+  /// "Stream error" (e.g. 401, unsupported codec), shown to the user.
+  String? _lastLog;
+
   @override
   void initState() {
     super.initState();
@@ -97,7 +101,14 @@ class _RtspPlayerWidgetState extends State<RtspPlayerWidget> with WidgetsBinding
       RtspPlayerRegistry.instance._register(widget.playerTag!, _player);
     }
     _subs
-      ..add(_player.stream.error.listen((e) => _onFailure(_humanize(e))))
+      ..add(
+        _player.stream.log.listen((l) {
+          if (l.level == 'error' || l.level == 'warn') {
+            _lastLog = _stripCredentials('${l.prefix}: ${l.text}'.trim());
+          }
+        }),
+      )
+      ..add(_player.stream.error.listen((e) => _onFailure(_explain(e))))
       ..add(
         _player.stream.buffering.listen((b) {
           if (b && _status == RtspPlayerStatus.playing) _setStatus(RtspPlayerStatus.buffering);
@@ -145,6 +156,7 @@ class _RtspPlayerWidgetState extends State<RtspPlayerWidget> with WidgetsBinding
   Future<void> _open() async {
     if (_disposed || _paused) return;
     _retryTimer?.cancel();
+    _lastLog = null;
     _setStatus(RtspPlayerStatus.connecting);
     try {
       await _configureLowLatency();
@@ -153,7 +165,7 @@ class _RtspPlayerWidgetState extends State<RtspPlayerWidget> with WidgetsBinding
       _watchdog?.cancel();
       _watchdog = Timer.periodic(const Duration(seconds: 2), (_) => _checkStall());
     } catch (e) {
-      _onFailure(_humanize('$e'));
+      _onFailure(_explain('$e'));
     }
   }
 
@@ -188,6 +200,20 @@ class _RtspPlayerWidgetState extends State<RtspPlayerWidget> with WidgetsBinding
     _player.stop().then((_) => _open());
   }
 
+  static final _userInfo = RegExp(r'([a-z][a-z0-9+.-]*://)[^/@\s]+@', caseSensitive: false);
+  static String _stripCredentials(String s) => s.replaceAllMapped(_userInfo, (m) => '${m[1]}***@');
+
+  /// Friendly text, falling back to the player's own last message.
+  String _explain(String raw) {
+    final detail = _lastLog;
+    final friendly = _humanize('$raw ${detail ?? ''}');
+    if (friendly != 'Stream error') return friendly;
+    final text = detail ?? _stripCredentials(raw);
+    return text.isEmpty
+        ? friendly
+        : 'Stream error: ${text.length > 160 ? '${text.substring(0, 160)}…' : text}';
+  }
+
   static String _humanize(String raw) {
     final r = raw.toLowerCase();
     if (r.contains('401') || r.contains('unauthorized')) return 'Authentication failed';
@@ -195,6 +221,8 @@ class _RtspPlayerWidgetState extends State<RtspPlayerWidget> with WidgetsBinding
     if (r.contains('refused')) return 'Connection refused by device';
     if (r.contains('unreachable') || r.contains('no route')) return 'Device unreachable';
     if (r.contains('404') || r.contains('not found')) return 'Stream path not found';
+    if (r.contains('403') || r.contains('forbidden')) return 'This user may not view this camera';
+    if (r.contains('461') || r.contains('unsupported transport')) return 'Device refused RTSP over TCP';
     return 'Stream error';
   }
 
