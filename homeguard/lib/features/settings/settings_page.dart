@@ -43,6 +43,12 @@ class SettingsPage extends StatelessWidget {
             subtitle: const Text('Finds the door station and indoor monitor'),
             onTap: () => _discover(context),
           ),
+          ListTile(
+            leading: const Icon(Icons.network_check),
+            title: const Text('Device diagnostics'),
+            subtitle: const Text('What each device supports; shareable report'),
+            onTap: () => context.push('/settings/diagnostics'),
+          ),
           const _Header('Streaming'),
           SwitchListTile(
             title: const Text('Use sub-stream in grid'),

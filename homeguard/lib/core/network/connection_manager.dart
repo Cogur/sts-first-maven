@@ -32,6 +32,7 @@ class ResolvedRoute {
     required this.secure,
     required this.latency,
     required this.checkedAt,
+    this.bridge = false,
   });
 
   const ResolvedRoute.unreachable(this.checkedAt)
@@ -40,6 +41,7 @@ class ResolvedRoute {
       rtspPort = 0,
       httpPort = 0,
       secure = false,
+      bridge = false,
       latency = null;
 
   final RouteKind kind;
@@ -49,10 +51,15 @@ class ResolvedRoute {
 
   /// True when the transport itself is encrypted (rtsps/https).
   final bool secure;
+
+  /// Route goes through a HomeGuard Bridge (different stream names, HTTPS API).
+  final bool bridge;
   final Duration? latency;
   final DateTime checkedAt;
 
   bool get reachable => kind != RouteKind.unreachable;
+
+  String streamPath(DeviceConfig d, StreamQuality q) => bridge ? d.bridgePath(q) : d.rtspPath(q);
   String get rtspScheme => secure ? 'rtsps' : 'rtsp';
   String get httpScheme => secure ? 'https' : 'http';
 
@@ -193,8 +200,8 @@ class ConnectionManager extends ChangeNotifier {
     if (result == null &&
         d.remoteMode != RemoteMode.disabled &&
         d.remoteHost.isNotEmpty &&
-        (d.remoteMode == RemoteMode.tls || await _isTunnelAddress(d.remoteHost))) {
-      final tls = d.remoteMode == RemoteMode.tls;
+        (d.remoteMode != RemoteMode.vpn || await _isTunnelAddress(d.remoteHost))) {
+      final tls = d.remoteMode != RemoteMode.vpn;
       final rtspPort = tls ? d.rtspsPort : d.rtspPort;
       final httpPort = tls ? d.httpsPort : d.httpPort;
       final port = d.kind == DeviceKind.indoorMonitor ? httpPort : rtspPort;
@@ -206,6 +213,7 @@ class ConnectionManager extends ChangeNotifier {
           rtspPort: rtspPort,
           httpPort: httpPort,
           secure: tls,
+          bridge: d.remoteMode == RemoteMode.bridge,
           latency: rtt,
           checkedAt: now,
         );

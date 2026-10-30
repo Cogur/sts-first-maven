@@ -9,6 +9,8 @@ import '../../core/rtsp/rtsp_client.dart';
 import '../../core/security/biometric_service.dart';
 import '../../core/security/secure_store.dart';
 import '../../core/services/device_registry.dart';
+import '../../core/tvt/nvr_setup.dart';
+import '../../core/tvt/tvt_web_client.dart';
 import '../../core/utils/log.dart';
 
 enum AuthStatus { initializing, signedOut, locked, authenticated }
@@ -24,8 +26,12 @@ Future<void> rtspCredentialVerifier(Uri uri, Credentials c) async {
 }
 
 class LoginException implements Exception {
-  LoginException(this.message);
+  LoginException(this.message, {this.needsRtspConsent = false});
   final String message;
+
+  /// The password is right but the NVR's RTSP service is off. Ask the user,
+  /// then call `signIn(..., allowEnableRtsp: true)`.
+  final bool needsRtspConsent;
   @override
   String toString() => message;
 }
@@ -37,7 +43,9 @@ class AuthController extends ChangeNotifier {
     required DeviceRegistry registry,
     required ConnectionManager connections,
     CredentialVerifier verifier = rtspCredentialVerifier,
+    NvrSetup? setup,
   }) : _store = store,
+       _setup = setup ?? NvrSetup(),
        _bio = biometrics,
        _registry = registry,
        _connections = connections,
@@ -48,6 +56,8 @@ class AuthController extends ChangeNotifier {
   final DeviceRegistry _registry;
   final ConnectionManager _connections;
   final CredentialVerifier _verify;
+  final NvrSetup _setup;
+  String? _notice;
 
   AuthStatus _status = AuthStatus.initializing;
   RememberedLogin? _remembered;
@@ -56,6 +66,14 @@ class AuthController extends ChangeNotifier {
   DateTime? _lockoutUntil;
 
   AuthStatus get status => _status;
+
+  /// One-off message for the user after sign-in (e.g. "RTSP was enabled").
+  String? takeNotice() {
+    final n = _notice;
+    _notice = null;
+    return n;
+  }
+
   RememberedLogin? get remembered => _remembered;
   bool get biometricAvailable => _biometricAvailable;
   bool get canUseBiometricUnlock => _biometricAvailable && (_remembered?.biometricEnabled ?? false);
@@ -113,6 +131,8 @@ class AuthController extends ChangeNotifier {
     String remoteHost = '',
     RemoteMode remoteMode = RemoteMode.disabled,
     String cameraPathTemplate = '',
+    bool allowEnableRtsp = false,
+    int? webPort,
   }) async {
     final wait = lockoutRemaining;
     if (wait != null) {
@@ -136,6 +156,10 @@ class AuthController extends ChangeNotifier {
         remoteHost: remote,
         remoteMode: remote.isEmpty ? RemoteMode.disabled : remoteMode,
         rtspPort: parsePort(host),
+        httpPort: webPort,
+        // HomeGuard Bridge defaults (tools/bridge/docker-compose.yml).
+        rtspsPort: remoteMode == RemoteMode.bridge && nvr.rtspsPort == 322 ? 8322 : null,
+        httpsPort: remoteMode == RemoteMode.bridge && nvr.httpsPort == 443 ? 8443 : null,
       ),
     );
     final template = cameraPathTemplate.trim();
@@ -147,7 +171,45 @@ class AuthController extends ChangeNotifier {
       }
     }
 
-    final route = await _connections.resolve(nvr.id, force: true);
+    // 1. The recorder's own web login: same account as SuperLive Plus and the
+    //    NVR web page. Gives a definite yes/no on the password, the camera
+    //    list, and lets the app switch RTSP on without any admin menus.
+    NvrSetupResult? setup;
+    final webPortToUse = webPort ?? nvr.httpPort;
+    if (lanHost.isNotEmpty && await _connections.isPortOpen(lanHost, webPortToUse)) {
+      try {
+        setup = await _setup.run(
+          host: lanHost,
+          httpPort: webPortToUse,
+          credentials: creds,
+          allowEnableRtsp: allowEnableRtsp,
+        );
+      } on NvrSetupException catch (e) {
+        if (e.authFailure) {
+          _registerFailure();
+          throw LoginException(
+            'Invalid username or password. Use the same account as in SuperLive Plus or on the NVR web page.',
+          );
+        }
+        if (e.needsRtsp) {
+          throw LoginException(
+            'Signed in, but the NVR\'s video service (RTSP) is switched off. HomeGuard can switch it on for you '
+            '(password protected, no anonymous access).',
+            needsRtspConsent: true,
+          );
+        }
+        // No TVT web interface here (other brand, simulator): plain RTSP check.
+        Log.w('auth', 'web sign-in skipped: $e');
+      }
+    }
+    if (setup != null) await _applySetup(nvr.id, setup, keepRtspPort: parsePort(host) != null);
+
+    var route = await _connections.resolve(nvr.id, force: true);
+    // A freshly enabled RTSP service needs a few seconds to start listening.
+    for (var i = 0; !route.reachable && (setup?.rtspWasEnabled ?? false) && i < 6; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      route = await _connections.resolve(nvr.id, force: true);
+    }
     if (!route.reachable) {
       final configured = _registry.firstOfKind(DeviceKind.nvr)!;
       // Distinguish "wrong address / not on Wi-Fi" from "NVR found, but its
@@ -166,24 +228,35 @@ class AuthController extends ChangeNotifier {
             : 'NVR is unreachable on both local and remote addresses.',
       );
     }
-    final firstCamera = _registry.devices.firstWhere((d) => d.parentId == nvr.id, orElse: () => nvr);
+    final firstCamera = _registry.devices.firstWhere(
+      (d) => d.parentId == nvr.id && d.enabled,
+      orElse: () => nvr,
+    );
     try {
-      await _verify(route.rtspUri(firstCamera.rtspPath(StreamQuality.sub)), creds);
+      await _verify(route.rtspUri(route.streamPath(firstCamera, StreamQuality.sub)), creds);
+      if (setup?.rtspWasEnabled ?? false) _notice = 'The NVR\'s video service was switched on.';
     } on RtspException catch (e) {
       final detail = e.detail == null ? '' : '\n\nNVR replied: ${e.detail}';
-      if (e.statusCode == 401) {
+      if (setup != null && e.isAuthFailure) {
+        // The web login already proved the password. Some TVT firmware
+        // rejects valid accounts on its RTSP relay; let the user in and say so.
+        Log.w('auth', 'web login ok but RTSP refused: ${e.detail ?? e.message}');
+        _notice =
+            'Signed in. The NVR accepted the password but its video service refused it, so live view may not '
+            'start. Check the user\'s "Remote preview" permission on the NVR.$detail';
+      } else if (e.statusCode == 401) {
         _registerFailure();
         throw LoginException(
           'Invalid username or password. Check upper/lower case — the video service is case-sensitive.$detail',
         );
-      }
-      if (e.statusCode == 403) {
+      } else if (e.statusCode == 403) {
         throw LoginException(
           'The NVR accepted the connection but refused this user. On the NVR, check that the user has '
           'live-view / remote preview permission (Account and Authority → Edit User).$detail',
         );
+      } else {
+        throw LoginException('NVR did not respond correctly: ${e.message}$detail');
       }
-      throw LoginException('NVR did not respond correctly: ${e.message}$detail');
     }
 
     _failures = 0;
@@ -201,6 +274,44 @@ class AuthController extends ChangeNotifier {
     _status = AuthStatus.authenticated;
     notifyListeners();
   }
+
+  /// Mirrors the NVR's channel list (names, count) into the topology, the way
+  /// SuperLive shows cameras without manual setup.
+  Future<void> _applySetup(String nvrId, NvrSetupResult setup, {required bool keepRtspPort}) async {
+    final nvr = _registry.byId(nvrId)!;
+    if (!keepRtspPort && setup.rtspPort != nvr.rtspPort) {
+      await _registry.upsert(nvr.copyWith(rtspPort: setup.rtspPort));
+    }
+    if (setup.channels.isEmpty) return;
+    final cams = _registry.devices.where((d) => d.parentId == nvrId).toList();
+    final template = cams.firstOrNull?.rtspPathTemplate ?? DeviceConfig.tvtRtspTemplate;
+    final wanted = {for (final c in setup.channels) c.number: c};
+    for (final cam in cams) {
+      final ch = wanted.remove(cam.channel);
+      final updated = ch == null
+          ? cam.copyWith(enabled: false)
+          : cam.copyWith(name: _name(ch), enabled: true);
+      if (updated.name != cam.name || updated.enabled != cam.enabled) await _registry.upsert(updated);
+    }
+    for (final ch in wanted.values) {
+      var id = 'cam${ch.number}';
+      while (_registry.byId(id) != null) {
+        id = '${id}x';
+      }
+      await _registry.upsert(
+        DeviceConfig(
+          id: id,
+          name: _name(ch),
+          kind: DeviceKind.camera,
+          parentId: nvrId,
+          channel: ch.number,
+          rtspPathTemplate: template,
+        ),
+      );
+    }
+  }
+
+  static String _name(TvtChannel c) => c.name.trim().isEmpty ? 'Camera ${c.number}' : c.name.trim();
 
   void _registerFailure() {
     _failures++;

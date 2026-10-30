@@ -4,19 +4,41 @@ HomeGuard is a Flutter app for Android and iOS. It replaces SuperLive Plus for a
 
 | Device | Model | How HomeGuard talks to it |
 |---|---|---|
-| NVR | TCR I12 S04-NS | RTSP (TVT path format `/chID={n}&streamType=main\|sub`), digest auth |
-| Cameras ×3 | (via NVR channels 1–3) | RTSP through the NVR |
-| Outdoor door station + Mifare RFID | TCTDB102 | RTSP/ONVIF video, ONVIF audio back-channel for talk, HTTP relay for unlock |
+| NVR | TCR I12 S04-NS | **Sign-in** through the NVR's own web interface (same account as SuperLive Plus); camera list and RTSP/API settings from it; video over RTSP (`/chID={n}&streamType=main\|sub`); recordings via the TVT HTTP API |
+| Cameras ×3 | (via NVR channels) | RTSP through the NVR; names and count follow the NVR automatically |
+| Outdoor door station + Mifare RFID | TCTDB102 (= TVT TD-E3110) | RTSP/ONVIF video, ONVIF back-channel for talk; unlock over HTTP **or the TVT device protocol (experimental)** |
 | Indoor monitor | TCTIS716 | HTTP index of SD-card snapshots/clips (sync), or manual SD-card import |
 
-There is no cloud and no P2P relay. The app looks for every device on the LAN first. It only uses a remote route if you configured one, and only over a VPN tunnel or TLS.
+On the LAN the app needs nothing else. For remote access without any router setup there is an optional
+self-hosted **[HomeGuard Bridge](tools/bridge/README.md)**: it reaches the recorder by its cloud serial
+through TVT's P2P servers, like SuperLive Plus does, and serves the app over TLS. Otherwise remote access
+is VPN or TLS only.
+
+### What is verified and what is not
+
+TVT publishes no developer documentation for these protocols. HomeGuard's TVT support is built from public
+reverse-engineering work (pytvt, 2BAD/tvt, both MIT) and TVT's HTTP API guide copies that circulate under
+OEM brands. Everything below is covered by tests against fakes; real-hardware status:
+
+| Feature | Status |
+|---|---|
+| Sign-in with the SuperLive / web account (NVMS-9000 `reqLogin`/`doLogin`) | Implemented per pytvt's field-tested code; **not yet tried on the TCR I12** |
+| Camera list from the NVR, one-tap "switch on RTSP" | Implemented; not yet tried on the TCR I12 |
+| Live view over RTSP | Works with the simulator; on the real NVR RTSP had to be enabled first |
+| Recordings (HTTP API `SearchByTime`) + playback timeline | Implemented; the RTSP **playback URL form is unconfirmed** on this firmware |
+| Door unlock via TVT protocol alarm output (port 9008) | **Experimental guess**: TVT documents no unlock API for the TD-E3110 |
+| Remote access by serial (Bridge, P2P 2.0) | Implemented on the vendor Linux SDK; needs an x86_64 Linux host; not yet tried with this NVR |
+| P2P directly in the phone app | **Not possible yet**: TVT ships the P2P client only as x86/Windows binaries; the UDP protocol is undocumented |
+
+Settings → **Device diagnostics** produces a shareable report (no passwords, serials masked) of what each
+device supports. It is the fastest way to close the remaining gaps for a specific model.
 
 ---
 
 ## Features
 
 **Authentication & security**
-- Login with NVR IP/domain, username and password. The credentials are checked with a real RTSP `DESCRIBE` (digest auth) against camera 1.
+- Login with the NVR's IP and **the same username/password as SuperLive Plus or the NVR web page**. HomeGuard signs in through the recorder's web interface, reads the camera list and, if the RTSP video service is off, offers to switch it on (password protected, never anonymous). Recorders without that interface (other brands, the simulator) are verified with an RTSP `DESCRIBE` against camera 1.
 - Remember me (keeps username and host) and an optional **Face ID / fingerprint** unlock.
 - Everything is stored in **flutter_secure_storage**: iOS Keychain (`first_unlock_this_device`, no iCloud sync) and the Android Keystore (RSA-OAEP + AES-GCM). There are no SharedPreferences and no plaintext files.
 - Brute-force lockout after 5 failed logins (30 s, then doubling up to 15 min).
@@ -87,12 +109,22 @@ lib/
     rtsp/                              RtspClient, stream parser, SDP, digest auth  ← pure Dart, unit-tested
     onvif/                             WS-Discovery (UDP), Media service SOAP + WS-Security
     audio/g711.dart                    µ-law / A-law encoders
-    services/                          DeviceRegistry, EventStore, DoorRelay, Intercom, MonitorSync
+    services/                          DeviceRegistry, EventStore, DoorRelay, Intercom, MonitorSync, Recordings
+    tvt/                               TVT/Techson protocols in pure Dart (Android + iOS):
+                                         tvt_web_client    NVMS-9000 web interface (login, cameras, RTSP/API Server)
+                                         tvt_lapi_client   TVT HTTP API (recording search, snapshot, NAT/cloud info)
+                                         tvt_net_protocol  binary device protocol, ports 6036/9008 (login, HTTP
+                                         tvt_net_client    tunnel, alarm outputs) with a pluggable transport
+                                         nvr_setup         sign-in flow; tvt_probe: diagnostics
+    bridge/                            client for the HomeGuard Bridge HTTPS API
   custom_code/                         FlutterFlow-shaped custom code
     actions/                           triggerDoorUnlock, checkLanReachability, probeRtspStream,
                                        captureSnapshot, toggleIntercom, discoverOnvifDevices
     widgets/rtsp_player_widget.dart    resilient low-latency RTSP player
-  features/                            auth, shell, live, events, access, settings (UI + controllers)
+  features/                            auth, shell, live, playback, events, access, settings (UI + controllers)
+tools/
+  simulator/                           fake NVR (RTSP + web interface + HTTP API), intercom, TVT protocol, monitor
+  bridge/                              HomeGuard Bridge: P2P login by serial on the vendor Linux SDK (Docker)
   theme/                               dark-first security palette
 ```
 
@@ -131,16 +163,22 @@ Platform notes:
 
 ## First-time setup for the Techson devices
 
-1. **Login**: enter the NVR's LAN IP (e.g. `192.168.1.100`) and the NVR admin account.
-   - The default camera path is TVT's `/chID={channel}&streamType={stream}&linkType=tcp` on port 554.
-   - If your firmware uses something else, change it under Settings → Camera N.
+1. **Login**: enter the NVR's LAN IP (SuperLive Plus → device → *Network Info*, e.g. `192.168.1.200`) and the account you use in SuperLive Plus.
+   - If the NVR's RTSP service is off, the app asks once and switches it on.
+   - Cameras appear with the names set on the NVR.
+   - The default camera path is TVT's `/chID={channel}&streamType={stream}&linkType=tcp` on port 554. If your firmware uses something else, change it under Settings → Camera N.
+   - **Playback** tab: the first search asks to switch on the NVR's *API Server* (needed for recording search).
 2. **Door station (TCTDB102)**: Settings → *Discover ONVIF devices*, then assign the device as *Front Door*. Next, open *Front Door* → **Detect via ONVIF** to fill the RTSP path.
    - Run **Probe stream** in Network status. If it reports *back-channel: no*, the unit does not expose ONVIF two-way audio; turn off "Two-way audio".
-3. **Door relay**: enter the unlock endpoint from your door station's HTTP/CGI API documentation, e.g. `/cgi-bin/accessControl.cgi?action=openDoor&channel=1`.
-   - Set the method and body if needed.
-   - Requests use Digest/Basic auth with the device (or NVR) credentials.
+3. **Door relay**: Settings → *Front Door* → **Unlock via**:
+   - *TVT protocol, alarm output (experimental)* for the TCTDB102: LAN IP of the door station, port 9008, output 0. Test once with the door in view.
+   - or *HTTP / CGI request* with the endpoint from your door station's documentation, e.g. `/cgi-bin/accessControl.cgi?action=openDoor&channel=1` (Digest/Basic auth).
 4. **Indoor monitor (TCTIS716)**: set its LAN IP. If its web server exposes the SD-card snapshot folder, put that path in *SD-card index path* and use **Sync** on the Events tab. Otherwise copy the files from the SD card and use **Import**.
-5. **Remote access (optional)**: set up a WireGuard/Tailscale tunnel to your home network. Then enter the NVR's tunnel address with mode **VPN tunnel**. Do not port-forward RTSP to the internet.
+5. **Remote access (optional)**, either:
+   - a WireGuard/Tailscale tunnel to your home network, then the NVR's tunnel address with mode **VPN tunnel**; or
+   - a [HomeGuard Bridge](tools/bridge/README.md) (P2P by serial, no router setup at home), mode **Bridge**.
+
+   Do not port-forward RTSP to the internet.
 
 ---
 
@@ -149,7 +187,9 @@ Platform notes:
 - **Not yet validated against the physical devices.**
   - The protocol code is tested against an in-process fake NVR (digest auth, SDP, back-channel RTP framing). The connection policy, auth flow and event store are unit-tested.
   - Real-hardware testing with the TCR I12 / TCTDB102 / TCTIS716 still needs to happen.
-- **Unlock and event endpoints are configurable, not hard-coded.** Techson does not publish the HTTP API for the TCTDB102 and TCTIS716. Take the exact relay and SD-card paths from the device documentation or its web UI.
+- **Unlock and event endpoints are configurable, not hard-coded.** Techson/TVT do not publish an API for the TCTDB102 and TCTIS716. The TVT-protocol unlock is an educated guess (the SDK's alarm-output command); run *Device diagnostics* if it does not work.
+- **TVT protocol support is reverse-engineered.** A firmware update can change it. The app uses the same account and permissions as the NVR web page and never changes settings without asking.
+- **The Bridge uses TVT's cloud and the vendor SDK without TVT's permission.** Fine for your own devices; publishing a product built on it needs TVT's written consent.
 - **Two-way talk needs ONVIF back-channel support.** If the door station only offers a proprietary or SIP intercom, talk will not work in this version. The probe tells you whether it is supported.
 - **No push notifications for doorbell rings.** That would need a persistent SIP/vendor event connection or a cloud relay, and "no cloud" is a deliberate design choice here. Ring events show up after a monitor sync.
 - **No local clip recording.** The app takes snapshots; clips come from the monitor or SD card.

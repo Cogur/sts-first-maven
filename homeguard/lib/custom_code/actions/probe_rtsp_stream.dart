@@ -18,7 +18,7 @@ Future<dynamic> probeRtspStream(String deviceId) async {
     final route = await s.connections.require(deviceId);
     final creds = s.registry.credentialsFor(deviceId);
     final r = await RtspClient.probe(
-      uri: route.rtspUri(device.rtspPath(StreamQuality.main)),
+      uri: route.rtspUri(route.streamPath(device, StreamQuality.main)),
       username: creds?.username ?? '',
       password: creds?.password ?? '',
     );

@@ -1,0 +1,17 @@
+{
+  "name": "homeguard-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Logs in to TVT/Techson recorders by cloud serial (P2P) or IP with the vendor Linux SDK and re-publishes them to the HomeGuard app over TLS.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "fetch-sdk": "sh scripts/fetch-sdk.sh",
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.test.mjs && sh native/test/run.sh"
+  },
+  "dependencies": {
+    "koffi": "2.9.2"
+  }
+}

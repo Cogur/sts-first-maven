@@ -19,6 +19,7 @@ class _LoginPageState extends State<LoginPage> {
   final _pass = TextEditingController();
   final _remote = TextEditingController();
   final _template = TextEditingController();
+  final _webPort = TextEditingController();
   bool _remember = true;
   bool _biometric = false;
   bool _obscure = true;
@@ -49,6 +50,7 @@ class _LoginPageState extends State<LoginPage> {
     _pass.dispose();
     _remote.dispose();
     _template.dispose();
+    _webPort.dispose();
     super.dispose();
   }
 
@@ -58,15 +60,18 @@ class _LoginPageState extends State<LoginPage> {
     if (!ok && mounted) setState(() => _error = 'Biometric unlock failed. Sign in with your password.');
   }
 
-  Future<void> _submit() async {
+  Future<void> _submit({bool allowEnableRtsp = false}) async {
     if (!_form.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
     setState(() {
       _busy = true;
       _error = null;
     });
+    final auth = context.read<AuthController>();
+    final messenger = ScaffoldMessenger.of(context);
+    var keepPassword = false;
     try {
-      await context.read<AuthController>().signIn(
+      await auth.signIn(
         host: _host.text,
         username: _user.text,
         password: _pass.text,
@@ -75,16 +80,47 @@ class _LoginPageState extends State<LoginPage> {
         remoteHost: _showRemote ? _remote.text : '',
         remoteMode: _remoteMode,
         cameraPathTemplate: _template.text,
+        allowEnableRtsp: allowEnableRtsp,
+        webPort: int.tryParse(_webPort.text.trim()),
       );
+      final notice = auth.takeNotice();
+      if (notice != null) {
+        messenger.showSnackBar(SnackBar(content: Text(notice), duration: const Duration(seconds: 8)));
+      }
     } on LoginException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      if (e.needsRtspConsent && mounted) {
+        keepPassword = true;
+        setState(() => _busy = false);
+        if (await _askEnableRtsp(e.message)) return _submit(allowEnableRtsp: true);
+        keepPassword = false;
+        if (mounted) {
+          setState(() => _error = 'Live view needs the NVR\'s video service. You can switch it on later.');
+        }
+      } else if (mounted) {
+        setState(() => _error = e.message);
+      }
     } catch (e) {
       if (mounted) setState(() => _error = 'Sign-in failed: $e');
     } finally {
-      _pass.clear();
+      if (!keepPassword) _pass.clear();
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  Future<bool> _askEnableRtsp(String message) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          icon: const Icon(Icons.videocam_outlined),
+          title: const Text('Switch on video service?'),
+          content: Text(message),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Not now')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Switch on')),
+          ],
+        ),
+      ) ??
+      false;
 
   @override
   Widget build(BuildContext context) {
@@ -138,12 +174,17 @@ class _LoginPageState extends State<LoginPage> {
                         autocorrect: false,
                         textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
-                          labelText: 'NVR local IP / hostname',
+                          labelText: 'NVR local IP address',
                           hintText: '192.168.1.100 or 192.168.1.100:554',
                           prefixIcon: Icon(Icons.lan_outlined),
                         ),
                         validator: (v) =>
                             (v ?? '').trim().isEmpty && _remote.text.trim().isEmpty ? 'Required' : null,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Use the same username and password as in SuperLive Plus or on the NVR web page.',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
@@ -177,7 +218,7 @@ class _LoginPageState extends State<LoginPage> {
                         validator: (v) => (v ?? '').isEmpty ? 'Required' : null,
                       ),
                       const SizedBox(height: 8),
-                      _AdvancedSection(controller: _template),
+                      _AdvancedSection(controller: _template, webPort: _webPort),
                       const SizedBox(height: 8),
                       _RemoteSection(
                         expanded: _showRemote,
@@ -226,8 +267,9 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 class _AdvancedSection extends StatelessWidget {
-  const _AdvancedSection({required this.controller});
+  const _AdvancedSection({required this.controller, required this.webPort});
   final TextEditingController controller;
+  final TextEditingController webPort;
 
   @override
   Widget build(BuildContext context) {
@@ -237,9 +279,20 @@ class _AdvancedSection extends StatelessWidget {
         child: ExpansionTile(
           leading: const Icon(Icons.tune),
           title: const Text('Advanced'),
-          subtitle: const Text('Camera stream path for non-standard firmware or the simulator'),
+          subtitle: const Text('Ports and stream path for non-standard firmware or the simulator'),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           children: [
+            TextFormField(
+              controller: webPort,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'NVR web page port', hintText: '80'),
+              validator: (v) {
+                final t = (v ?? '').trim();
+                final p = int.tryParse(t);
+                return t.isEmpty || (p != null && p > 0 && p < 65536) ? null : 'Port 1-65535';
+              },
+            ),
+            const SizedBox(height: 8),
             TextFormField(
               controller: controller,
               autocorrect: false,
@@ -302,18 +355,24 @@ class _RemoteSection extends StatelessWidget {
             SegmentedButton<RemoteMode>(
               segments: const [
                 ButtonSegment(value: RemoteMode.vpn, label: Text('VPN tunnel'), icon: Icon(Icons.vpn_lock)),
-                ButtonSegment(value: RemoteMode.tls, label: Text('TLS only'), icon: Icon(Icons.https)),
+                ButtonSegment(value: RemoteMode.tls, label: Text('TLS'), icon: Icon(Icons.https)),
+                ButtonSegment(
+                  value: RemoteMode.bridge,
+                  label: Text('Bridge'),
+                  icon: Icon(Icons.hub_outlined),
+                ),
               ],
               selected: {mode},
               onSelectionChanged: (s) => onMode(s.first),
             ),
             const SizedBox(height: 8),
-            Text(
-              mode == RemoteMode.vpn
-                  ? 'Recommended. Traffic is encrypted by your WireGuard/Tailscale/IPsec tunnel.'
-                  : 'Only rtsps:// and https:// are used. Plain RTSP/HTTP over the internet is refused.',
-              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-            ),
+            Text(switch (mode) {
+              RemoteMode.vpn => 'Recommended. Traffic is encrypted by your WireGuard/Tailscale/IPsec tunnel.',
+              RemoteMode.bridge =>
+                'A HomeGuard Bridge reaches the NVR through the TVT cloud by its serial number, like SuperLive '
+                    'Plus, with no router setup at home. Enter the bridge address; sign in with the bridge account.',
+              _ => 'Only rtsps:// and https:// are used. Plain RTSP/HTTP over the internet is refused.',
+            }, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
           ],
         ),
       ),

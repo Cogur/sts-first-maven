@@ -1,0 +1,44 @@
+# Video side of HomeGuard Bridge. The app connects with rtsps:// on 8322
+# using BRIDGE_USER / BRIDGE_PASSWORD (set through MTX_AUTHINTERNALUSERS_0_*
+# in docker-compose). Plain RTSP stays on loopback for the ffmpeg feeders.
+logLevel: info
+rtspAddress: 127.0.0.1:8554
+rtspsAddress: :8322
+encryption: optional
+serverKey: /certs/bridge.key
+serverCert: /certs/bridge.crt
+protocols: [tcp]
+rtspAuthMethods: [basic]
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+api: no
+
+authMethod: internal
+authInternalUsers:
+  - user: app            # overridden by MTX_AUTHINTERNALUSERS_0_USER
+    pass: change-me      # overridden by MTX_AUTHINTERNALUSERS_0_PASS
+    ips: []
+    permissions:
+      - action: read
+  - user: any
+    pass:
+    ips: ['127.0.0.1', '::1']
+    permissions:
+      - action: publish
+
+pathDefaults:
+  runOnDemandRestart: yes
+  runOnDemandStartTimeout: 30s   # P2P logins can take ~20 s
+  runOnDemandCloseAfter: 20s
+
+paths:
+  # Live:      /<device>_ch<N>_main  /<device>_ch<N>_sub
+  # Playback:  /<device>_ch<N>_pb_<YYYYMMDDhhmmss>_<YYYYMMDDhhmmss>
+  "~^[a-z0-9]+_ch[0-9]+_(main|sub|pb_[0-9]{14}_[0-9]{14})$":
+    runOnDemand: >-
+      ffmpeg -nostdin -loglevel error -fflags nobuffer
+      -use_wallclock_as_timestamps 1 -probesize 2M -analyzeduration 2M
+      -i http://127.0.0.1:8091/feed/$MTX_PATH
+      -c copy -an -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/$MTX_PATH

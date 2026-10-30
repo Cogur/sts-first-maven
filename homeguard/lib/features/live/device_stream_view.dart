@@ -81,7 +81,10 @@ class _DeviceStreamViewState extends State<DeviceStreamView> {
             onRetry: () => _resolve(force: true),
           );
         }
-        final url = route.rtspUrl(device.rtspPath(widget.quality), registry.credentialsFor(device.id));
+        final url = route.rtspUrl(
+          route.streamPath(device, widget.quality),
+          registry.credentialsFor(device.id),
+        );
         return Stack(
           fit: StackFit.expand,
           children: [
@@ -108,6 +111,7 @@ class RouteBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final (label, color, icon) = switch (route.kind) {
       RouteKind.lan => ('LAN', AppColors.secure, Icons.lan),
+      RouteKind.remote when route.bridge => ('P2P', AppColors.warning, Icons.hub_outlined),
       RouteKind.remote => (route.secure ? 'TLS' : 'VPN', AppColors.warning, Icons.vpn_lock),
       RouteKind.unreachable => ('OFF', AppColors.danger, Icons.link_off),
     };

@@ -35,6 +35,11 @@ class HomeShell extends StatelessWidget {
             label: 'Live',
           ),
           NavigationDestination(
+            icon: Icon(Icons.history_outlined),
+            selectedIcon: Icon(Icons.history),
+            label: 'Playback',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.photo_library_outlined),
             selectedIcon: Icon(Icons.photo_library),
             label: 'Events',

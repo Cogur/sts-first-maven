@@ -7,6 +7,7 @@ import 'services/door_relay_service.dart';
 import 'services/event_store.dart';
 import 'services/intercom_service.dart';
 import 'services/monitor_sync_service.dart';
+import 'services/recording_service.dart';
 
 /// Composition root. Widgets get these through Provider; FlutterFlow custom
 /// actions (which receive only primitive arguments) use [AppServices.instance].
@@ -26,6 +27,7 @@ class AppServices {
     relay = DoorRelayService(registry, this.connections, this.http, this.events);
     intercom = IntercomService(registry, this.connections);
     monitorSync = MonitorSyncService(registry, this.connections, this.http, this.events);
+    recordings = RecordingService(registry, this.connections);
   }
 
   static late AppServices instance;
@@ -39,4 +41,5 @@ class AppServices {
   late final DoorRelayService relay;
   late final IntercomService intercom;
   late final MonitorSyncService monitorSync;
+  late final RecordingService recordings;
 }

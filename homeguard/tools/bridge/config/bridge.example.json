@@ -1,0 +1,18 @@
+{
+  "natServer": "cli-nat20.eyeincloud.com:9969",
+  "devices": [
+    {
+      "id": "nvr",
+      "serial": "PUT-THE-NVR-CLOUD-ID-HERE",
+      "username": "admin",
+      "passwordEnv": "NVR_PASSWORD"
+    },
+    {
+      "id": "door",
+      "host": "192.168.1.201",
+      "port": 9008,
+      "username": "admin",
+      "passwordEnv": "DOOR_PASSWORD"
+    }
+  ]
+}

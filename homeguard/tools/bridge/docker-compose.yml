@@ -1,0 +1,30 @@
+# Run on an always-on x86_64 Linux machine (home server, NAS with Docker, or a
+# small VPS). With serial (P2P) login the machine does NOT need to be on the
+# same network as the recorder, and no router port forwarding is needed at
+# the recorder's site. The bridge's own ports 8443 and 8322 must be reachable
+# by the phone (VPS, or a VPN to the home server).
+services:
+  bridge:
+    build: .
+    platform: linux/amd64
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BRIDGE_CONFIG: /config/bridge.json
+      TZ: ${TZ:-Europe/Budapest}   # must match the recorder's clock for playback
+    volumes:
+      - ./config:/config:ro
+      - ./certs:/certs:ro
+    ports:
+      - "8443:8443"   # HTTPS API
+      - "8322:8322"   # RTSPS video (served by mediamtx in the bridge's network namespace)
+  mediamtx:
+    image: bluenviron/mediamtx:1.9.3-ffmpeg
+    restart: unless-stopped
+    network_mode: "service:bridge"
+    environment:
+      MTX_AUTHINTERNALUSERS_0_USER: ${BRIDGE_USER}
+      MTX_AUTHINTERNALUSERS_0_PASS: ${BRIDGE_PASSWORD}
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - ./certs:/certs:ro

@@ -25,9 +25,25 @@ enum RemoteMode {
   /// Direct exposure over the internet. Only `https://` and `rtsps://` are
   /// permitted; plaintext connections are refused.
   tls,
+
+  /// Through a HomeGuard Bridge (`tools/bridge`), which reaches the recorder
+  /// by its cloud serial like SuperLive Plus does. TLS only, like [tls], but
+  /// with the bridge's stream names and HTTPS API.
+  bridge,
 }
 
 enum StreamQuality { main, sub }
+
+/// How the door relay is fired.
+enum UnlockMethod {
+  /// HTTP/CGI request to [DeviceConfig.unlockPath] (most OEM intercoms).
+  http,
+
+  /// TVT device protocol (port 9008): pulse alarm output
+  /// [DeviceConfig.alarmOutput]. Experimental: TVT intercoms such as the
+  /// TD-E3110 / Techson TCTDB102 expose no documented unlock API.
+  tvtAlarmOutput,
+}
 
 class DeviceConfig {
   const DeviceConfig({
@@ -47,6 +63,10 @@ class DeviceConfig {
     this.unlockPath = '',
     this.unlockMethod = 'GET',
     this.unlockBody = '',
+    this.unlockVia = UnlockMethod.http,
+    this.alarmOutput = 0,
+    this.unlockHoldMs = 1000,
+    this.netPort = 9008,
     this.eventIndexPath = '',
     this.supportsTalk = false,
     this.enabled = true,
@@ -79,13 +99,24 @@ class DeviceConfig {
   final String unlockMethod;
   final String unlockBody;
 
+  /// Relay mechanism. ([unlockMethod] is the HTTP verb of the `http` way.)
+  final UnlockMethod unlockVia;
+  final int alarmOutput;
+  final int unlockHoldMs;
+
+  /// TVT device protocol port: 9008 on cameras/intercoms, 6036 on recorders.
+  final int netPort;
+
   /// HTTP path on the indoor monitor that lists stored snapshots.
   final String eventIndexPath;
   final bool supportsTalk;
   final bool enabled;
 
   bool get hasVideo => kind == DeviceKind.camera || kind == DeviceKind.doorStation;
-  bool get canUnlock => unlockPath.isNotEmpty;
+  bool get canUnlock => unlockVia == UnlockMethod.tvtAlarmOutput || unlockPath.isNotEmpty;
+
+  /// Stream name on a HomeGuard Bridge: `/<recorder id>_ch<N>_<main|sub>`.
+  String bridgePath(StreamQuality quality) => '/${parentId ?? id}_ch${channel}_${quality.name}';
 
   String rtspPath(StreamQuality quality) => rtspPathTemplate
       .replaceAll('{channel}', '$channel')
@@ -107,6 +138,10 @@ class DeviceConfig {
     String? unlockPath,
     String? unlockMethod,
     String? unlockBody,
+    UnlockMethod? unlockVia,
+    int? alarmOutput,
+    int? unlockHoldMs,
+    int? netPort,
     String? eventIndexPath,
     bool? supportsTalk,
     bool? enabled,
@@ -127,6 +162,10 @@ class DeviceConfig {
     unlockPath: unlockPath ?? this.unlockPath,
     unlockMethod: unlockMethod ?? this.unlockMethod,
     unlockBody: unlockBody ?? this.unlockBody,
+    unlockVia: unlockVia ?? this.unlockVia,
+    alarmOutput: alarmOutput ?? this.alarmOutput,
+    unlockHoldMs: unlockHoldMs ?? this.unlockHoldMs,
+    netPort: netPort ?? this.netPort,
     eventIndexPath: eventIndexPath ?? this.eventIndexPath,
     supportsTalk: supportsTalk ?? this.supportsTalk,
     enabled: enabled ?? this.enabled,
@@ -149,6 +188,10 @@ class DeviceConfig {
     'unlockPath': unlockPath,
     'unlockMethod': unlockMethod,
     'unlockBody': unlockBody,
+    'unlockVia': unlockVia.name,
+    'alarmOutput': alarmOutput,
+    'unlockHoldMs': unlockHoldMs,
+    'netPort': netPort,
     'eventIndexPath': eventIndexPath,
     'supportsTalk': supportsTalk,
     'enabled': enabled,
@@ -171,6 +214,10 @@ class DeviceConfig {
     unlockPath: j['unlockPath'] as String? ?? '',
     unlockMethod: j['unlockMethod'] as String? ?? 'GET',
     unlockBody: j['unlockBody'] as String? ?? '',
+    unlockVia: UnlockMethod.values.asNameMap()[j['unlockVia']] ?? UnlockMethod.http,
+    alarmOutput: j['alarmOutput'] as int? ?? 0,
+    unlockHoldMs: j['unlockHoldMs'] as int? ?? 1000,
+    netPort: j['netPort'] as int? ?? 9008,
     eventIndexPath: j['eventIndexPath'] as String? ?? '',
     supportsTalk: j['supportsTalk'] as bool? ?? false,
     enabled: j['enabled'] as bool? ?? true,

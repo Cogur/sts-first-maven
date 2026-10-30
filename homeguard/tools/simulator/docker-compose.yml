@@ -19,4 +19,6 @@ services:
     ports:
       - "8080:8080"   # door station relay
       - "8081:8081"   # indoor monitor SD card
+      - "8082:8082"   # NVR web interface + HTTP API (TVT NVMS-9000)
+      - "9008:9008"   # TVT device protocol (door relay as alarm output)
     restart: unless-stopped

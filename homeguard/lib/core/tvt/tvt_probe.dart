@@ -1,0 +1,139 @@
+import 'dart:async';
+import 'dart:io';
+
+import '../security/secure_store.dart';
+import 'tvt_lapi_client.dart';
+import 'tvt_net_client.dart';
+import 'tvt_web_client.dart';
+
+/// Read-only fact finding on one device, for the diagnostics screen. It never
+/// changes settings. The report is what is needed to add support for a model
+/// whose API is not documented (e.g. the door station's unlock command).
+class TvtProbe {
+  TvtProbe({this.timeout = const Duration(seconds: 2)});
+  final Duration timeout;
+
+  static const ports = {
+    80: 'HTTP',
+    443: 'HTTPS',
+    554: 'RTSP',
+    6036: 'TVT (recorder)',
+    9008: 'TVT (camera/intercom)',
+    8000: 'alt. HTTP/SDK',
+    5060: 'SIP',
+  };
+
+  Future<bool> _open(String host, int port) async {
+    try {
+      final s = await Socket.connect(host, port, timeout: timeout);
+      s.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Masks the middle of a cloud serial so a report can be shared.
+  static String mask(String s) =>
+      s.length <= 6 ? '***' : '${s.substring(0, 3)}***${s.substring(s.length - 3)}';
+
+  Future<List<String>> run(String host, Credentials? creds, {int httpPort = 80}) async {
+    final out = <String>['# $host'];
+    final open = <int>{};
+    await Future.wait(
+      ports.keys.map((p) async {
+        if (await _open(host, p)) open.add(p);
+      }),
+    );
+    out.add(
+      'Open ports: ${open.isEmpty ? 'none' : (open.toList()..sort()).map((p) => '$p (${ports[p]})').join(', ')}',
+    );
+
+    for (final p in [6036, 9008].where(open.contains)) {
+      try {
+        final c = await TvtNetClient.connect(host, p);
+        try {
+          final init = await Future.any([
+            Future.doWhile(() async {
+              await Future<void>.delayed(const Duration(milliseconds: 50));
+              return c.init == null;
+            }).then((_) => c.init),
+            Future<void>.delayed(timeout).then((_) => null),
+          ]);
+          if (init == null) {
+            out.add('Port $p: no TVT greeting');
+            continue;
+          }
+          out.add(
+            'Port $p: TVT protocol v${init.protocolVer}, device type ${init.devType}, '
+            'product ${init.productType}, login encryption ${init.loginEncrypt}',
+          );
+          if (creds != null) {
+            try {
+              final info = await c.login(creds.username, creds.password);
+              out.add('  login OK${info.channels.isEmpty ? '' : ', channels ${info.channels}'}');
+            } on TvtNetException catch (e) {
+              out.add('  login: $e');
+            }
+          }
+        } finally {
+          await c.close();
+        }
+      } on TvtNetException catch (e) {
+        out.add('Port $p: $e');
+      }
+    }
+
+    if (open.contains(httpPort) && creds != null) {
+      final web = TvtWebClient(
+        host: host,
+        port: httpPort,
+        username: creds.username,
+        password: creds.password,
+      );
+      try {
+        await web.login();
+        out.add('Web interface (NVMS-9000): login OK');
+        try {
+          final r = await web.rtspServer();
+          out.add('  RTSP service: ${r.enabled ? 'on' : 'off'}, port ${r.port}, ${r.authType}');
+        } on TvtWebException catch (e) {
+          out.add('  RTSP settings: $e');
+        }
+        try {
+          out.add('  API Server: ${await web.apiServerEnabled() ? 'on' : 'off'}');
+        } on TvtWebException catch (e) {
+          out.add('  API Server: $e');
+        }
+      } on TvtWebException catch (e) {
+        out.add('Web interface (NVMS-9000): ${e.notTvt ? 'not present' : e}');
+      } finally {
+        web.close();
+      }
+
+      final lapi = TvtLapiClient(host: host, port: httpPort, credentials: creds);
+      try {
+        final apis = (await lapi.supportedApis()).toList()..sort();
+        out.add('HTTP API: ${apis.length} commands');
+        out.add('  ${apis.join(', ')}');
+        final door = apis.where(
+          (a) => RegExp('door|lock|relay|alarmout|output', caseSensitive: false).hasMatch(a),
+        );
+        if (door.isNotEmpty) out.add('  Door/relay candidates: ${door.join(', ')}');
+      } catch (e) {
+        out.add('HTTP API: $e');
+      }
+      try {
+        final nat = await lapi.natInfo();
+        out.add(
+          'Cloud (P2P): ${nat.enabled ? 'on' : 'off'}'
+          '${nat.serial == null ? '' : ', serial ${mask(nat.serial!)}'}'
+          '${nat.status == null || nat.status!.isEmpty ? '' : ', status ${nat.status}'}',
+        );
+      } catch (_) {
+        // Not every model exposes NAT settings over the HTTP API.
+      }
+    }
+    return out;
+  }
+}

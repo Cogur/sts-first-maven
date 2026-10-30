@@ -11,6 +11,8 @@ import 'package:homeguard/core/rtsp/rtsp_client.dart';
 import 'package:homeguard/core/security/biometric_service.dart';
 import 'package:homeguard/core/security/secure_store.dart';
 import 'package:homeguard/core/services/device_registry.dart';
+import 'package:homeguard/core/tvt/nvr_setup.dart';
+import 'package:homeguard/core/tvt/tvt_web_client.dart';
 import 'package:homeguard/features/auth/auth_controller.dart';
 import 'package:homeguard/features/auth/login_page.dart';
 import 'package:provider/provider.dart';
@@ -29,6 +31,33 @@ class FakeBiometrics extends BiometricService {
   }
 }
 
+/// Stands in for the NVR web interface.
+class FakeSetup extends NvrSetup {
+  bool web = false; // false: no TVT web interface answers
+  String password = 'pw';
+  bool rtspOn = true;
+  List<TvtChannel> channels = const [];
+  int calls = 0;
+
+  @override
+  Future<NvrSetupResult> run({
+    required String host,
+    required int httpPort,
+    required Credentials credentials,
+    required bool allowEnableRtsp,
+  }) async {
+    calls++;
+    if (!web) throw NvrSetupException('no web', unreachable: true);
+    if (credentials.password != password) throw NvrSetupException('bad', authFailure: true);
+    var enabled = false;
+    if (!rtspOn) {
+      if (!allowEnableRtsp) throw NvrSetupException('off', needsRtsp: true);
+      rtspOn = enabled = true;
+    }
+    return NvrSetupResult(channels: channels, rtspPort: 554, rtspWasEnabled: enabled);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -39,12 +68,14 @@ void main() {
   late List<Uri> verified;
   String goodPassword = 'pw';
   Set<String> up = {};
+  late FakeSetup setup;
 
   AuthController build() => AuthController(
     store: store,
     biometrics: bio,
     registry: registry,
     connections: cm,
+    setup: setup,
     verifier: (uri, c) async {
       verified.add(uri);
       if (c.password != goodPassword) throw RtspException('bad', statusCode: 401);
@@ -57,6 +88,8 @@ void main() {
     bio = FakeBiometrics();
     up = {'192.168.1.10:554'};
     verified = [];
+    setup = FakeSetup();
+    goodPassword = 'pw';
     cm = ConnectionManager(
       probe: (h, p, _) async => up.contains('$h:$p') ? Duration.zero : null,
       lookup: (h) async => [InternetAddress(h)],
@@ -244,6 +277,87 @@ void main() {
       ),
       throwsA(isA<LoginException>().having((e) => e.message, 'message', contains('video (RTSP) port 554'))),
     );
+  });
+
+  group('NVR web sign-in (SuperLive account)', () {
+    setUp(() => up.add('192.168.1.10:80')); // the web page answers
+    Future<void> signIn(AuthController auth, {String password = 'pw', bool allowEnableRtsp = false}) =>
+        auth.signIn(
+          host: '192.168.1.10',
+          username: 'admin',
+          password: password,
+          remember: false,
+          enableBiometrics: false,
+          allowEnableRtsp: allowEnableRtsp,
+        );
+
+    test('web sign-in is skipped when the web page does not answer', () async {
+      setup.web = true;
+      up.remove('192.168.1.10:80');
+      final auth = build();
+      await auth.init();
+      await signIn(auth);
+      expect(setup.calls, 0);
+      expect(auth.status, AuthStatus.authenticated);
+    });
+
+    test('wrong web password is rejected before any RTSP attempt', () async {
+      setup.web = true;
+      final auth = build();
+      await auth.init();
+      await expectLater(
+        signIn(auth, password: 'nope'),
+        throwsA(isA<LoginException>().having((e) => e.message, 'msg', contains('SuperLive'))),
+      );
+      expect(verified, isEmpty);
+    });
+
+    test('RTSP off asks for consent, then is switched on and noticed', () async {
+      setup
+        ..web = true
+        ..rtspOn = false;
+      final auth = build();
+      await auth.init();
+      await expectLater(
+        signIn(auth),
+        throwsA(isA<LoginException>().having((e) => e.needsRtspConsent, 'consent', isTrue)),
+      );
+      expect(auth.status, AuthStatus.signedOut);
+      await signIn(auth, allowEnableRtsp: true);
+      expect(auth.status, AuthStatus.authenticated);
+      expect(auth.takeNotice(), contains('switched on'));
+      expect(auth.takeNotice(), isNull);
+    });
+
+    test('camera list follows the NVR: names, extra channels, missing ones disabled', () async {
+      setup
+        ..web = true
+        ..channels = const [
+          TvtChannel(number: 1, name: 'Gate', id: '{1}'),
+          TvtChannel(number: 3, name: ' ', id: '{3}'),
+          TvtChannel(number: 4, name: 'Garden', id: '{4}'),
+        ];
+      final auth = build();
+      await auth.init();
+      await signIn(auth);
+      expect(registry.byId('cam1')!.name, 'Gate');
+      expect(registry.byId('cam2')!.enabled, isFalse);
+      expect(registry.byId('cam3')!.name, 'Camera 3');
+      expect(registry.byId('cam4')!.name, 'Garden');
+      expect(registry.byId('cam4')!.parentId, 'nvr');
+      expect(registry.videoDevices.map((d) => d.id), containsAll(['cam1', 'cam3', 'cam4']));
+      expect(registry.videoDevices.map((d) => d.id), isNot(contains('cam2')));
+    });
+
+    test('RTSP refusing a password the web login accepted still signs in, with a notice', () async {
+      setup.web = true;
+      goodPassword = 'something-else'; // RTSP relay rejects the account
+      final auth = build();
+      await auth.init();
+      await signIn(auth);
+      expect(auth.status, AuthStatus.authenticated);
+      expect(auth.takeNotice(), contains('refused'));
+    });
   });
 
   test('remote VPN route is used when LAN is down', () async {

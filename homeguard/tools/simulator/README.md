@@ -25,7 +25,7 @@ docker compose up
    python3 fake_devices.py
    ```
 
-Find your PC's LAN IP (`ipconfig` on Windows, `ipconfig getifaddr en0` on macOS, `hostname -I` on Linux). The phone must be on the **same Wi-Fi**. If the phone can't connect, allow ports 8554, 8080 and 8081 through the PC firewall.
+Find your PC's LAN IP (`ipconfig` on Windows, `ipconfig getifaddr en0` on macOS, `hostname -I` on Linux). The phone must be on the **same Wi-Fi**. If the phone can't connect, allow ports 8554, 8080, 8081, 8082 and 9008 through the PC firewall.
 
 ## 2. Log in with the app
 
@@ -33,9 +33,11 @@ Find your PC's LAN IP (`ipconfig` on Windows, `ipconfig getifaddr en0` on macOS,
 |---|---|
 | NVR local IP | `<PC-IP>:8554` |
 | Username / password | `admin` / `admin123` |
+| Advanced → NVR web page port | `8082` (fake TVT web interface; leave empty to test the plain RTSP sign-in) |
 | Advanced → Camera RTSP path template | `/cam{channel}_{stream}` |
 
 Try a wrong password first: you should see *Invalid username or password*. After 5 tries the login locks for 30 s.
+With the web port set, the cameras appear as *Front Gate*, *Garden* and *Garage* (names come from the fake NVR).
 
 ## 3. Configure the door station and monitor (Settings → Devices)
 
@@ -44,7 +46,8 @@ Try a wrong password first: you should see *Invalid username or password*. After
 - RTSP port: `8554`
 - HTTP port: `8080`
 - RTSP path template: `/door_{stream}`
-- Unlock endpoint: `/cgi-bin/accessControl.cgi?action=openDoor&channel=1` (method GET)
+- Unlock via **HTTP / CGI**: `/cgi-bin/accessControl.cgi?action=openDoor&channel=1` (method GET),
+  or via **TVT protocol, alarm output**: device port `9008`, output `0` (terminal prints *TVT ALARM OUTPUT 0 ON*)
 - Turn **Two-way audio** off: the simulator has no ONVIF back-channel.
 
 **Indoor Monitor**
@@ -58,6 +61,8 @@ Try a wrong password first: you should see *Invalid username or password*. After
 - [ ] Tap a tile. Fullscreen opens; HD/SD switches stream; pinch-zoom works; you hear a 440 Hz tone on main streams (unmute).
 - [ ] **Snapshot** in fullscreen saves an image to the **Events** tab.
 - [ ] **Access** tab: *Hold to unlock* → biometric prompt → the PC terminal prints *DOOR UNLOCKED* → entry appears in the access log.
+- [ ] **Playback** tab: first search asks to switch on the API Server; after that the timeline shows recordings every two hours plus short motion clips (orange). Tapping plays the camera's test stream (the simulator has no real recordings).
+- [ ] **Settings → Device diagnostics** → *Run*: lists open ports, the TVT protocol on 9008 and the web interface on 8082.
 - [ ] **Events → Sync**: imports the face, call, motion and card events with correct tags and times. Wait 2 minutes, sync again, and only the new event arrives.
 - [ ] **Settings → Network status → Probe stream** (on the Front Door): shows H264, PCMU and *back-channel: no*.
 - [ ] Stop the simulator (Ctrl-C). Tiles show an error and retry, with no crash. Start it again and the streams come back by themselves.

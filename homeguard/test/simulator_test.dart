@@ -20,6 +20,9 @@ import 'package:homeguard/core/services/device_registry.dart';
 import 'package:homeguard/core/services/door_relay_service.dart';
 import 'package:homeguard/core/services/event_store.dart';
 import 'package:homeguard/core/services/monitor_sync_service.dart';
+import 'package:homeguard/core/tvt/tvt_lapi_client.dart';
+import 'package:homeguard/core/tvt/tvt_net_client.dart';
+import 'package:homeguard/core/tvt/tvt_web_client.dart';
 import 'package:homeguard/features/auth/auth_controller.dart';
 
 class _NoBiometrics extends BiometricService {
@@ -126,4 +129,37 @@ void main() {
     );
     expect(await MonitorSyncService(registry, cm, http, events).sync('monitor'), 0); // no duplicates
   }, skip: skip);
+
+  group('TVT simulator (fake_devices.py)', () {
+    test('NVR web sign-in, camera list, API Server and recording search', () async {
+      final web = TvtWebClient(host: host!, port: 8082, username: 'admin', password: 'admin123');
+      await web.login();
+      final cams = await web.channels();
+      expect(cams.map((c) => c.name), ['Front Gate', 'Garden', 'Garage']);
+      expect((await web.rtspServer()).port, 8554);
+      await web.enableApiServer();
+      expect(await web.apiServerEnabled(), isTrue);
+      web.close();
+
+      final lapi = TvtLapiClient(host: host, port: 8082, credentials: const Credentials('admin', 'admin123'));
+      final day = DateTime.now();
+      final segs = await lapi.searchByTime(2, DateTime(day.year, day.month, day.day), day);
+      expect(segs, isNotEmpty);
+      expect(segs.any((s) => s.type == 'motion'), isTrue);
+
+      final bad = TvtWebClient(host: host, port: 8082, username: 'admin', password: 'wrong');
+      await expectLater(
+        bad.login(),
+        throwsA(isA<TvtWebException>().having((e) => e.authFailure, 'auth', true)),
+      );
+    }, skip: skip);
+
+    test('door relay over the TVT device protocol (port 9008)', () async {
+      final c = await TvtNetClient.connect(host!, 9008);
+      final info = await c.login('admin', 'admin123');
+      expect(info.deviceName, 'HomeGuardDoor');
+      await c.pulseAlarmOut(0, const Duration(milliseconds: 300));
+      await c.close();
+    }, skip: skip);
+  });
 }

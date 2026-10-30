@@ -1,0 +1,33 @@
+name: HomeGuard Bridge
+
+# Unit tests for tools/bridge (fake SDK, no vendor code, no network) and a
+# Docker build check, which downloads the vendor SDK into the image.
+
+on:
+  push:
+    paths:
+      - 'homeguard/tools/bridge/**'
+      - '.github/workflows/homeguard-bridge.yml'
+  pull_request:
+    paths:
+      - 'homeguard/tools/bridge/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: homeguard/tools/bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
+      - name: Docker image builds (vendor SDK + P2P shim)
+        run: docker build -t homeguard-bridge:ci .

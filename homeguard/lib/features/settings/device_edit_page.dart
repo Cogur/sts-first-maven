@@ -41,6 +41,9 @@ class _DeviceEditPageState extends State<DeviceEditPage> {
       'unlock': TextEditingController(text: _d.unlockPath),
       'unlockBody': TextEditingController(text: _d.unlockBody),
       'events': TextEditingController(text: _d.eventIndexPath),
+      'alarmOut': TextEditingController(text: '${_d.alarmOutput}'),
+      'hold': TextEditingController(text: '${_d.unlockHoldMs}'),
+      'netPort': TextEditingController(text: '${_d.netPort}'),
     };
     if (registry.hasOwnCredentials(_d.id)) _user.text = registry.credentialsFor(_d.id)?.username ?? '';
   }
@@ -73,6 +76,9 @@ class _DeviceEditPageState extends State<DeviceEditPage> {
       unlockPath: _c['unlock']!.text.trim(),
       unlockBody: _c['unlockBody']!.text,
       eventIndexPath: _c['events']!.text.trim(),
+      alarmOutput: _int('alarmOut', 0),
+      unlockHoldMs: _int('hold', 1000),
+      netPort: _int('netPort', 9008),
     );
     await registry.upsert(updated);
     if (_d.parentId == null && _user.text.trim().isNotEmpty && _pass.text.isNotEmpty) {
@@ -202,12 +208,13 @@ class _DeviceEditPageState extends State<DeviceEditPage> {
                   DropdownMenuItem(value: RemoteMode.disabled, child: Text('Disabled (LAN only)')),
                   DropdownMenuItem(value: RemoteMode.vpn, child: Text('VPN tunnel')),
                   DropdownMenuItem(value: RemoteMode.tls, child: Text('TLS only (rtsps/https)')),
+                  DropdownMenuItem(value: RemoteMode.bridge, child: Text('HomeGuard Bridge (P2P)')),
                 ],
                 onChanged: (m) => setState(() => _d = _d.copyWith(remoteMode: m)),
               ),
               const SizedBox(height: 12),
               if (_d.remoteMode != RemoteMode.disabled) _field('remote', 'Remote host / domain'),
-              if (_d.remoteMode == RemoteMode.tls)
+              if (_d.remoteMode == RemoteMode.tls || _d.remoteMode == RemoteMode.bridge)
                 Row(
                   children: [
                     Expanded(child: _field('rtsps', 'RTSPS port', number: true)),
@@ -234,27 +241,57 @@ class _DeviceEditPageState extends State<DeviceEditPage> {
               ],
               if (_d.kind == DeviceKind.doorStation || _d.kind == DeviceKind.indoorMonitor) ...[
                 const _Section('Door relay'),
-                _field(
-                  'unlock',
-                  'Unlock endpoint (path + query)',
-                  hint: '/cgi-bin/accessControl.cgi?action=openDoor&channel=1',
-                ),
-                DropdownButtonFormField<String>(
-                  initialValue: _d.unlockMethod,
-                  decoration: const InputDecoration(labelText: 'HTTP method'),
+                DropdownButtonFormField<UnlockMethod>(
+                  initialValue: _d.unlockVia,
+                  decoration: const InputDecoration(labelText: 'Unlock via'),
                   items: const [
-                    'GET',
-                    'POST',
-                    'PUT',
-                  ].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-                  onChanged: (m) => setState(() => _d = _d.copyWith(unlockMethod: m)),
+                    DropdownMenuItem(value: UnlockMethod.http, child: Text('HTTP / CGI request')),
+                    DropdownMenuItem(
+                      value: UnlockMethod.tvtAlarmOutput,
+                      child: Text('TVT protocol, alarm output (experimental)'),
+                    ),
+                  ],
+                  onChanged: (m) => setState(() => _d = _d.copyWith(unlockVia: m)),
                 ),
                 const SizedBox(height: 12),
-                if (_d.unlockMethod != 'GET') _field('unlockBody', 'Request body (optional)', maxLines: 3),
-                const _Hint(
-                  'Use the relay API documented for your door station firmware. '
-                  'The request is sent with Digest/Basic auth to the resolved LAN or secure remote address.',
-                ),
+                if (_d.unlockVia == UnlockMethod.tvtAlarmOutput) ...[
+                  Row(
+                    children: [
+                      Expanded(child: _field('alarmOut', 'Alarm output (0 = first)', number: true)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _field('hold', 'Hold (ms)', number: true)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _field('netPort', 'Device port', number: true)),
+                    ],
+                  ),
+                  const _Hint(
+                    'For TVT-made intercoms (e.g. Techson TCTDB102 / TVT TD-E3110) that have no documented unlock '
+                    'API: HomeGuard signs in with the device protocol (port 9008, same account as SuperLive) and '
+                    'pulses the relay output. Test it once with the door in view.',
+                  ),
+                ] else ...[
+                  _field(
+                    'unlock',
+                    'Unlock endpoint (path + query)',
+                    hint: '/cgi-bin/accessControl.cgi?action=openDoor&channel=1',
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: _d.unlockMethod,
+                    decoration: const InputDecoration(labelText: 'HTTP method'),
+                    items: const [
+                      'GET',
+                      'POST',
+                      'PUT',
+                    ].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+                    onChanged: (m) => setState(() => _d = _d.copyWith(unlockMethod: m)),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_d.unlockMethod != 'GET') _field('unlockBody', 'Request body (optional)', maxLines: 3),
+                  const _Hint(
+                    'Use the relay API documented for your door station firmware. '
+                    'The request is sent with Digest/Basic auth to the resolved LAN or secure remote address.',
+                  ),
+                ],
               ],
               if (_d.kind == DeviceKind.indoorMonitor) ...[
                 const _Section('Event storage'),
