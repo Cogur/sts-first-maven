@@ -222,6 +222,7 @@ class _RtspPlayerWidgetState extends State<RtspPlayerWidget> with WidgetsBinding
     if (r.contains('unreachable') || r.contains('no route')) return 'Device unreachable';
     if (r.contains('404') || r.contains('not found')) return 'Stream path not found';
     if (r.contains('403') || r.contains('forbidden')) return 'This user may not view this camera';
+    if (r.contains('recognize file format')) return 'Device refused the stream (check the RTSP login)';
     if (r.contains('461') || r.contains('unsupported transport')) return 'Device refused RTSP over TCP';
     return 'Stream error';
   }

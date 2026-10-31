@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/models/device.dart';
 import '../../core/network/connection_manager.dart';
+import '../../core/rtsp/rtsp_client.dart';
 import '../../core/services/device_registry.dart';
 import '../../core/tvt/tvt_lapi_client.dart';
 import '../../custom_code/widgets/rtsp_player_widget.dart';
@@ -44,10 +45,38 @@ class _DeviceStreamViewState extends State<DeviceStreamView> {
   bool _snapshotMode = false;
   int _authFailures = 0;
 
+  bool _classified = false;
+
   void _onPlayerStatus(RtspPlayerStatus s, String? message) {
     if (s == RtspPlayerStatus.playing) _authFailures = 0;
-    if (s == RtspPlayerStatus.error && message == 'Authentication failed' && ++_authFailures >= 2) {
-      if (mounted) setState(() => _snapshotMode = true);
+    if (s != RtspPlayerStatus.error || _snapshotMode) return;
+    if (message == 'Authentication failed' && ++_authFailures >= 2) {
+      setState(() => _snapshotMode = true);
+    } else if (!_classified) {
+      // libmpv often reports only "failed to recognize file format"; ask the
+      // device ourselves (once per tile) whether it refused the password.
+      _classified = true;
+      unawaited(_classify());
+    }
+  }
+
+  Future<void> _classify() async {
+    final registry = context.read<DeviceRegistry>();
+    final device = registry.byId(widget.deviceId);
+    final creds = registry.credentialsFor(widget.deviceId);
+    final route = await _route;
+    if (device == null || creds == null || route == null || !route.reachable) return;
+    try {
+      await RtspClient.probe(
+        uri: route.rtspUri(route.streamPath(device, widget.quality)),
+        username: creds.username,
+        password: creds.password,
+        backchannel: false,
+      );
+    } on RtspException catch (e) {
+      if (e.isAuthFailure && mounted) setState(() => _snapshotMode = true);
+    } catch (_) {
+      // Network trouble: the player keeps retrying on its own.
     }
   }
 
@@ -117,6 +146,7 @@ class _DeviceStreamViewState extends State<DeviceStreamView> {
                 onRetryVideo: () => setState(() {
                   _snapshotMode = false;
                   _authFailures = 0;
+                  _classified = false;
                 }),
               )
             else
