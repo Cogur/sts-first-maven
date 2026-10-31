@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:http/http.dart' as http;
 
 import '../rtsp/rtsp_client.dart';
 import '../security/secure_store.dart';
@@ -73,16 +76,83 @@ class TvtProbe {
     }
   }
 
+  /// Reads the recorder's own web UI scripts (public static files) and lists
+  /// how its browser live view talks to the device: WebSocket addresses and
+  /// live/stream/preview commands. Read-only.
+  Future<void> _scanWebUi(String host, int port, List<String> out) async {
+    final client = http.Client();
+    try {
+      Future<String?> get(String path) async {
+        try {
+          final res = await client
+              .get(Uri(scheme: 'http', host: host, port: port, path: path))
+              .timeout(timeout * 3);
+          if (res.statusCode != 200 || res.bodyBytes.length > 4 * 1024 * 1024) return null;
+          return utf8.decode(res.bodyBytes, allowMalformed: true);
+        } catch (_) {
+          return null;
+        }
+      }
+
+      final index = await get('/') ?? '';
+      final scripts = <String>{
+        for (final m in RegExp(r'''(?:src|data-main)\s*=\s*["']([^"']+)["']''').allMatches(index))
+          if (m[1]!.contains('.js') || !m[1]!.contains('.')) m[1]!.split('?').first,
+      };
+      final snippets = <String>{};
+      final commands = <String>{};
+      var scanned = 0;
+      final queue = scripts.toList();
+      while (queue.isNotEmpty && scanned < 40) {
+        var path = queue.removeAt(0);
+        if (!path.startsWith('/')) path = '/$path';
+        if (!path.endsWith('.js')) path = '$path.js';
+        final js = await get(path);
+        if (js == null) continue;
+        scanned++;
+        for (final m in RegExp(r'(?:new WebSocket|wss?://|websocket)', caseSensitive: false).allMatches(js)) {
+          if (snippets.length >= 15) break;
+          final a = (m.start - 60).clamp(0, js.length);
+          final b = (m.end + 90).clamp(0, js.length);
+          snippets.add('$path: ${js.substring(a, b).replaceAll(RegExp(r'\s+'), ' ')}');
+        }
+        for (final m in RegExp(r'''url\s*:\s*["']([A-Za-z0-9_/.]+)["']''').allMatches(js)) {
+          final c = m[1]!;
+          if (RegExp('live|stream|preview|play|socket|snap|jpeg|pic', caseSensitive: false).hasMatch(c)) {
+            commands.add(c);
+          }
+        }
+        // Follow other scripts the loader references (require.js style).
+        for (final m in RegExp(r'''["']((?:/?[A-Za-z0-9_-]+/)+[A-Za-z0-9_.-]+\.js)["']''').allMatches(js)) {
+          final next = m[1]!;
+          if (queue.length < 80 && !scripts.contains(next)) {
+            scripts.add(next);
+            queue.add(next);
+          }
+        }
+      }
+      out.add('Web UI scan: $scanned scripts');
+      if (commands.isNotEmpty) {
+        out.add('  live-related commands: ${(commands.toList()..sort()).take(40).join(', ')}');
+      }
+      for (final sn in snippets) {
+        out.add('  ws: $sn');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
   Future<List<String>> run(String host, Credentials? creds, {int httpPort = 80, int rtspPort = 554}) async {
     final out = <String>['# $host'];
     final open = <int>{};
     await Future.wait(
-      ports.keys.map((p) async {
+      {...ports.keys, httpPort}.map((p) async {
         if (await _open(host, p)) open.add(p);
       }),
     );
     out.add(
-      'Open ports: ${open.isEmpty ? 'none' : (open.toList()..sort()).map((p) => '$p (${ports[p]})').join(', ')}',
+      'Open ports: ${open.isEmpty ? 'none' : (open.toList()..sort()).map((p) => '$p (${ports[p] ?? 'HTTP'})').join(', ')}',
     );
 
     for (final p in [6036, 9008].where(open.contains)) {
@@ -166,6 +236,8 @@ class TvtProbe {
       } finally {
         web.close();
       }
+
+      await _scanWebUi(host, httpPort, out);
 
       final lapi = TvtLapiClient(host: host, port: httpPort, credentials: creds);
       try {

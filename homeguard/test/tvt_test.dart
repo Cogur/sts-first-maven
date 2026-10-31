@@ -5,7 +5,9 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homeguard/core/tvt/tvt_net_client.dart';
+import 'package:homeguard/core/security/secure_store.dart';
 import 'package:homeguard/core/tvt/tvt_net_protocol.dart';
+import 'package:homeguard/core/tvt/tvt_probe.dart';
 import 'package:homeguard/core/tvt/tvt_web_client.dart';
 
 import 'support/fake_tvt.dart';
@@ -154,5 +156,28 @@ void main() {
     final b = Uint8List(8)..setRange(0, 4, ascii.encode('1111'));
     ByteData.sublistView(b).setUint32(4, 0x7fffffff, Endian.little);
     expect(() => (TvtStreamParser()..add(TvtCodec.heartbeat())).add(b), throwsFormatException);
+  });
+
+  test('diagnostics find the web UI live-view WebSocket and commands', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((req) async {
+      final files = {
+        '/': '<html><script data-main="js/main" src="/js/require.js"></script></html>',
+        '/js/require.js': '/* loader */',
+        '/js/main.js': 'define(["js/app/live/preview.js"],function(){})',
+        '/js/app/live/preview.js': 'var s=new WebSocket("ws://"+location.host+"/requestWebsocketConnection");Communication.Request({url:"queryLiveStream",data:x})',
+      };
+      final body = files[req.uri.path];
+      req.response.statusCode = body == null ? 404 : 200;
+      if (body != null) req.response.write(body);
+      await req.response.close();
+    });
+    final out = await TvtProbe(timeout: const Duration(milliseconds: 300))
+        .run('127.0.0.1', const Credentials('admin', 'x'), httpPort: server.port, rtspPort: 1);
+    final report = out.join('\n');
+    expect(report, contains('Web UI scan: 3 scripts'));
+    expect(report, contains('queryLiveStream'));
+    expect(report, contains('requestWebsocketConnection'));
   });
 }
