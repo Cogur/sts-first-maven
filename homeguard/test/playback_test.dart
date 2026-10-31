@@ -25,6 +25,10 @@ class FakeLapi {
   String? lastBody;
   bool apiServerOff = false;
 
+  /// Firmware that only answers the flat `/SearchByTime/<ch>` form.
+  bool flatOnly = false;
+  final paths = <String>[];
+
   Future<void> start() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
@@ -35,7 +39,11 @@ class FakeLapi {
           ..headers.set('WWW-Authenticate', 'Basic realm="nvr"');
         return req.response.close();
       }
-      if (apiServerOff || req.uri.path != '/LAPI/V1.0/Playback/SearchByTime') {
+      paths.add(req.uri.path);
+      final wanted = flatOnly
+          ? RegExp(r'^/SearchByTime/\d+$')
+          : RegExp(r'^/LAPI/V1\.0/Playback/SearchByTime$');
+      if (apiServerOff || !wanted.hasMatch(req.uri.path)) {
         req.response.statusCode = 404;
         return req.response.close();
       }
@@ -115,6 +123,25 @@ void main() {
     final sought = RecordingService.seek(recs.first, DateTime(2026, 10, 30, 7, 10));
     expect(sought.segment.end, recs.first.segment.end);
     expect(sought.path, contains('time=07:10:00&timelen=1200'));
+  });
+
+  test('firmware with flat HTTP API URLs is found and remembered', () async {
+    final lapi = FakeLapi()..flatOnly = true;
+    await lapi.start();
+    addTearDown(() => lapi.server.close(force: true));
+    await setUpRegistry(httpPort: lapi.server.port);
+    final client = TvtLapiClient(
+      host: '127.0.0.1',
+      port: lapi.server.port,
+      credentials: const Credentials('admin', 'pw'),
+    );
+    final day = DateTime(2026, 10, 30);
+    expect(await client.searchByTime(3, day, day.add(const Duration(hours: 23))), hasLength(2));
+    expect(client.urlStyle, 'flat');
+    lapi.paths.clear();
+    await client.searchByTime(3, day, day.add(const Duration(hours: 23)));
+    expect(lapi.paths.where((p) => p.startsWith('/LAPI')), isEmpty);
+    expect(lapi.paths.last, '/SearchByTime/3');
   });
 
   test('API Server switched off is reported so the app can offer to enable it', () async {

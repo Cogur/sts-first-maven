@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
 
 import '../network/device_http_client.dart';
@@ -53,14 +54,34 @@ class TvtLapiClient {
 
   Uri _uri(String path) => Uri(scheme: secure ? 'https' : 'http', host: host, port: port, path: path);
 
-  Future<XmlDocument> _post(String path, [String body = '']) async {
-    final res = await _http.send(
+  /// Firmware answers either `/LAPI/V1.0/<group>/<name>` or the flat
+  /// `/<CommandName>[/channel]` form of the HTTP API guide; remembered once seen.
+  bool? _flat;
+
+  /// Which URL form the device answered: `flat`, `LAPI`, or null if unknown.
+  String? get urlStyle => _flat == null ? null : (_flat! ? 'flat' : 'LAPI');
+
+  Future<XmlDocument> _post(String path, [String body = '', String? flat]) async {
+    Future<http.Response> send(String p) => _http.send(
       'POST',
-      _uri('/LAPI/V1.0$path'),
+      _uri(p),
       credentials: credentials,
       body: body.isEmpty ? null : '<?xml version="1.0" encoding="utf-8"?>$body',
       headers: const {'Content-Type': 'application/xml', 'Accept': 'application/xml'},
     );
+    http.Response res;
+    if (_flat == true && flat != null) {
+      res = await send(flat);
+    } else {
+      try {
+        res = await send('/LAPI/V1.0$path');
+        _flat = false;
+      } on DeviceHttpException catch (e) {
+        if (e.statusCode != 404 || flat == null) rethrow;
+        res = await send(flat);
+        _flat = true;
+      }
+    }
     final doc = XmlDocument.parse(res.body);
     final status = doc.findAllElements('statusCode').firstOrNull?.innerText.trim();
     if (status != null && status != '200' && status != '0') {
@@ -75,7 +96,7 @@ class TvtLapiClient {
   /// API names the device advertises, e.g. `SearchByTime`, `GetSnapshot`.
   Future<Set<String>> supportedApis() async {
     if (_apis != null) return _apis!;
-    final doc = await _post('/System/SupportedAPIs');
+    final doc = await _post('/System/SupportedAPIs', '', '/GetSupportedAPIs');
     return _apis = {
       for (final e in doc.findAllElements('apiName'))
         if (e.innerText.trim().isNotEmpty) e.innerText.trim(),
@@ -83,7 +104,7 @@ class TvtLapiClient {
   }
 
   Future<Map<String, String>> deviceInfo() async {
-    final doc = await _post('/System/DeviceInfo');
+    final doc = await _post('/System/DeviceInfo', '', '/GetDeviceInfo');
     final root = doc.findAllElements('DeviceInfo').firstOrNull ?? doc.rootElement;
     return {
       for (final e in root.childElements)
@@ -121,6 +142,7 @@ class TvtLapiClient {
     final doc = await _post(
       '/Playback/SearchRecordDate',
       '<SearchRecordDate><channelID>$channel</channelID><year>$year</year><month>$month</month></SearchRecordDate>',
+      '/SearchRecordDate/$channel',
     );
     final out = <DateTime>{};
     for (final e in doc.findAllElements('date')) {
@@ -150,6 +172,7 @@ class TvtLapiClient {
       '<SearchByTime><channelID>$channel</channelID>'
           '<startTime>${formatTime(from, isoT: isoT)}</startTime>'
           '<endTime>${formatTime(to, isoT: isoT)}</endTime></SearchByTime>',
+      '/SearchByTime/$channel',
     );
     XmlDocument doc;
     try {

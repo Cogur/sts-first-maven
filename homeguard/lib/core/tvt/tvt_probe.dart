@@ -167,7 +167,21 @@ class TvtProbe {
         );
         if (door.isNotEmpty) out.add('  Door/relay candidates: ${door.join(', ')}');
       } catch (e) {
-        out.add('HTTP API: $e');
+        out.add('HTTP API command list: $e');
+      }
+      try {
+        final info = await lapi.deviceInfo();
+        out.add('HTTP API (${lapi.urlStyle} URLs): device info OK, ${info.length} fields');
+        final model = info['deviceModel'] ?? info['model'] ?? info['productModel'];
+        if (model != null) out.add('  model $model');
+      } catch (e) {
+        out.add('HTTP API device info: $e');
+      }
+      try {
+        final jpeg = await lapi.snapshot(1);
+        out.add('HTTP API snapshot (camera 1): OK, ${jpeg.length ~/ 1024} kB');
+      } catch (e) {
+        out.add('HTTP API snapshot (camera 1): $e');
       }
       try {
         final nat = await lapi.natInfo();
