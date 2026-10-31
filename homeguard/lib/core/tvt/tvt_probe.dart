@@ -108,6 +108,16 @@ class TvtProbe {
             try {
               final info = await c.login(creds.username, creds.password);
               out.add('  login OK${info.channels.isEmpty ? '' : ', channels ${info.channels}'}');
+              // HTTP through the logged-in session: needs no Digest password.
+              for (final path in ['/GetSnapshot/1', '/LAPI/V1.0/System/DeviceInfo']) {
+                try {
+                  final body = await c.http(path).timeout(const Duration(seconds: 4));
+                  final head = String.fromCharCodes(body.take(60).where((b) => b >= 32 && b < 127));
+                  out.add('  tunnel $path: ${body.length} bytes${head.isEmpty ? '' : ' "$head"'}');
+                } catch (e) {
+                  out.add('  tunnel $path: ${e is TimeoutException ? 'no answer' : e}');
+                }
+              }
             } on TvtNetException catch (e) {
               out.add('  login: $e');
             }
